@@ -1,0 +1,3120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>[PRD] PRISM — Liquidity Management Protocol on Uniswap V4</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..900,0..100&family=Newsreader:ital,opsz,wght@0,6..72,300..700;1,6..72,300..700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-primary: #0d0d13;
+    --bg-secondary: #131320;
+    --bg-card: #17172a;
+    --bg-code: #0a0a12;
+    --border-subtle: #22223a;
+    --border-accent: #ff5c8a;
+    --text-primary: #ebe5d5;
+    --text-bright: #fbf7ed;
+    --text-secondary: #9690a3;
+    --text-muted: #66627a;
+
+    /* PRISM prismatic spectrum */
+    --spec-1: #ff5c8a;   /* rose */
+    --spec-2: #ff9a3d;   /* amber */
+    --spec-3: #f0d860;   /* yellow */
+    --spec-4: #6dd3be;   /* mint */
+    --spec-5: #6d8cff;   /* indigo */
+    --spec-6: #b87eff;   /* violet */
+
+    --accent-rose: var(--spec-1);
+    --accent-amber: var(--spec-2);
+    --accent-yellow: var(--spec-3);
+    --accent-mint: var(--spec-4);
+    --accent-indigo: var(--spec-5);
+    --accent-violet: var(--spec-6);
+
+    --accent-red: #ef4444;
+    --accent-green: #10b981;
+    --accent-blue: #3b82f6;
+
+    --gradient-hero: linear-gradient(135deg, #0f0e1a 0%, #1a0d1e 50%, #0d0d13 100%);
+    --gradient-spectrum: linear-gradient(90deg, var(--spec-1) 0%, var(--spec-2) 20%, var(--spec-3) 40%, var(--spec-4) 60%, var(--spec-5) 80%, var(--spec-6) 100%);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Newsreader', Georgia, serif;
+    font-optical-sizing: auto;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    line-height: 1.7;
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+  }
+
+  /* Subtle grain */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.3;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' /%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.4'/%3E%3C/svg%3E");
+    z-index: 100;
+  }
+
+  ::selection { background: var(--spec-1); color: var(--bg-primary); }
+
+  .container { max-width: 1100px; margin: 0 auto; padding: 0 32px; position: relative; z-index: 1; }
+
+  /* ─── Spectrum bar accent ─── */
+  .spectrum-bar {
+    height: 3px;
+    background: var(--gradient-spectrum);
+    width: 100%;
+  }
+  .spectrum-bar.thin { height: 1px; }
+
+  /* ─── HERO ─── */
+  .hero {
+    background: var(--gradient-hero);
+    border-bottom: 1px solid var(--border-subtle);
+    padding: 90px 0 70px;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 60% 40% at 20% 40%, rgba(255,92,138,0.10) 0%, transparent 60%),
+      radial-gradient(ellipse 50% 40% at 85% 70%, rgba(109,140,255,0.08) 0%, transparent 60%),
+      radial-gradient(ellipse 40% 30% at 50% 100%, rgba(184,126,255,0.06) 0%, transparent 60%);
+    z-index: 0;
+  }
+  .hero-content { position: relative; z-index: 1; }
+  .hero-badge {
+    display: inline-block;
+    padding: 5px 16px;
+    border: 1px solid rgba(255,92,138,0.35);
+    border-radius: 24px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent-rose);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 26px;
+    background: rgba(255,92,138,0.04);
+  }
+  .hero h1 {
+    font-family: 'Fraunces', Georgia, serif;
+    font-size: 78px;
+    font-weight: 300;
+    line-height: 0.92;
+    letter-spacing: -0.045em;
+    margin-bottom: 22px;
+    font-variation-settings: "opsz" 144, "SOFT" 80;
+    color: var(--text-bright);
+  }
+  .hero h1 .accent {
+    background: var(--gradient-spectrum);
+    background-size: 200% 200%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-style: italic;
+    font-weight: 300;
+    animation: shimmer 14s ease-in-out infinite;
+  }
+  @keyframes shimmer {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+  }
+  .hero-subtitle {
+    font-family: 'Fraunces', Georgia, serif;
+    font-style: italic;
+    font-weight: 300;
+    font-size: 20px;
+    line-height: 1.45;
+    color: var(--text-secondary);
+    max-width: 720px;
+    font-variation-settings: "opsz" 144;
+  }
+  .hero-meta {
+    margin-top: 40px;
+    display: flex;
+    gap: 36px;
+    flex-wrap: wrap;
+    padding-top: 28px;
+    border-top: 1px solid var(--border-subtle);
+  }
+  .hero-meta-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .hero-meta-item .label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1.6px;
+  }
+  .hero-meta-item .value {
+    font-family: 'Newsreader', serif;
+    font-size: 15px;
+    color: var(--text-bright);
+    font-weight: 500;
+  }
+
+  /* Hero prism visual */
+  .hero-prism-bg {
+    position: absolute;
+    top: 50%;
+    right: -4%;
+    transform: translateY(-50%);
+    width: 46%;
+    max-width: 560px;
+    opacity: 0.55;
+    pointer-events: none;
+    z-index: 0;
+  }
+  .hero-prism-bg svg {
+    width: 100%;
+    height: auto;
+    animation: slow-rotate 90s linear infinite;
+    transform-origin: center;
+  }
+  @keyframes slow-rotate {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  /* ─── SECTIONS ─── */
+  .section {
+    padding: 72px 0;
+    border-bottom: 1px solid var(--border-subtle);
+    position: relative;
+  }
+  .section:last-child { border-bottom: none; }
+
+  .section-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 2.4px;
+    color: var(--accent-rose);
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .section-label::before {
+    content: '';
+    display: inline-block;
+    width: 28px;
+    height: 1px;
+    background: var(--accent-rose);
+  }
+
+  h2 {
+    font-family: 'Fraunces', Georgia, serif;
+    font-size: 44px;
+    font-weight: 400;
+    letter-spacing: -0.035em;
+    line-height: 1.05;
+    margin-bottom: 28px;
+    color: var(--text-bright);
+    font-variation-settings: "opsz" 144, "SOFT" 50;
+  }
+
+  h3 {
+    font-family: 'Fraunces', serif;
+    font-size: 24px;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    margin: 44px 0 18px;
+    color: var(--text-bright);
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-subtle);
+    position: relative;
+    font-variation-settings: "opsz" 144;
+  }
+  h3::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    bottom: -1px;
+    height: 1px;
+    width: 80px;
+    background: var(--accent-rose);
+  }
+
+  h4 {
+    font-family: 'Fraunces', serif;
+    font-size: 18px;
+    font-weight: 600;
+    margin: 30px 0 12px;
+    color: var(--accent-mint);
+    font-variation-settings: "opsz" 144;
+    letter-spacing: -0.01em;
+  }
+
+  p {
+    margin-bottom: 18px;
+    color: var(--text-secondary);
+    font-size: 16px;
+    line-height: 1.7;
+  }
+  strong { color: var(--text-bright); font-weight: 600; }
+  em { color: var(--text-bright); font-style: italic; }
+
+  a {
+    color: var(--accent-rose);
+    text-decoration-color: rgba(255,92,138,0.3);
+    text-underline-offset: 3px;
+    transition: color 0.2s;
+  }
+  a:hover { color: var(--spec-5); }
+
+  ul, ol { padding-left: 1.4em; margin-bottom: 18px; color: var(--text-secondary); }
+  ul li, ol li { margin-bottom: 8px; padding-left: 6px; }
+  ul li::marker { color: var(--accent-rose); }
+  ol li::marker { color: var(--accent-rose); font-family: 'JetBrains Mono', monospace; font-size: 0.9em; }
+
+  /* ─── DIAGRAMS ─── */
+  .diagram-wrapper {
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    padding: 32px 24px;
+    margin: 32px 0;
+    overflow-x: auto;
+    position: relative;
+  }
+  .diagram-wrapper::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--gradient-spectrum);
+    border-radius: 12px 12px 0 0;
+    opacity: 0.6;
+  }
+  .diagram-wrapper .mermaid { display: flex; justify-content: center; }
+  .diagram-caption {
+    text-align: center;
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-top: 16px;
+    font-variation-settings: "opsz" 144;
+  }
+
+  /* ─── CODE BLOCKS ─── */
+  pre {
+    background: var(--bg-code);
+    border: 1px solid var(--border-subtle);
+    border-radius: 10px;
+    padding: 22px 26px;
+    margin: 14px 0 24px;
+    overflow-x: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    line-height: 1.65;
+    color: #d4cfc0;
+  }
+  code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.88em;
+    background: rgba(255,92,138,0.08);
+    padding: 2px 7px;
+    border-radius: 3px;
+    color: var(--spec-3);
+    border: 1px solid rgba(255,92,138,0.12);
+  }
+  pre code {
+    background: none;
+    padding: 0;
+    border: none;
+    color: #d4cfc0;
+    font-size: 13px;
+  }
+
+  .code-label {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.4px;
+    padding: 4px 11px;
+    border-radius: 3px;
+    margin-bottom: 8px;
+    margin-top: 8px;
+  }
+  .code-label.sol { background: rgba(98,126,234,0.12); color: #8ba0e8; border: 1px solid rgba(98,126,234,0.2); }
+  .code-label.ts { background: rgba(109,211,190,0.12); color: var(--spec-4); border: 1px solid rgba(109,211,190,0.2); }
+  .code-label.tsx { background: rgba(109,140,255,0.12); color: var(--spec-5); border: 1px solid rgba(109,140,255,0.2); }
+  .code-label.toml { background: rgba(184,126,255,0.12); color: var(--spec-6); border: 1px solid rgba(184,126,255,0.2); }
+  .code-label.bash { background: rgba(240,216,96,0.12); color: var(--spec-3); border: 1px solid rgba(240,216,96,0.2); }
+  .code-label.yaml { background: rgba(16,185,129,0.12); color: var(--accent-green); border: 1px solid rgba(16,185,129,0.2); }
+  .code-label.json { background: rgba(255,154,61,0.12); color: var(--spec-2); border: 1px solid rgba(255,154,61,0.2); }
+
+  /* ─── TABLES ─── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 24px 0;
+    font-size: 14px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  th {
+    text-align: left;
+    padding: 14px 18px;
+    background: var(--bg-card);
+    border-bottom: 2px solid rgba(255,92,138,0.3);
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600;
+    color: var(--text-bright);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+  }
+  td {
+    padding: 13px 18px;
+    border-bottom: 1px solid var(--border-subtle);
+    color: var(--text-secondary);
+    font-family: 'Newsreader', serif;
+    line-height: 1.55;
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,92,138,0.025); }
+  td strong, td code { color: var(--text-bright); }
+
+  /* ─── CALLOUTS ─── */
+  .callout {
+    border-radius: 10px;
+    padding: 22px 26px;
+    margin: 26px 0;
+    border-left: 4px solid;
+    position: relative;
+  }
+  .callout p { margin-bottom: 8px; }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout-critical {
+    background: rgba(239,68,68,0.05);
+    border-color: var(--accent-red);
+  }
+  .callout-critical .callout-title { color: var(--accent-red); }
+  .callout-info {
+    background: rgba(109,140,255,0.05);
+    border-color: var(--spec-5);
+  }
+  .callout-info .callout-title { color: var(--spec-5); }
+  .callout-perf {
+    background: rgba(109,211,190,0.05);
+    border-color: var(--spec-4);
+  }
+  .callout-perf .callout-title { color: var(--spec-4); }
+  .callout-warn {
+    background: rgba(255,154,61,0.05);
+    border-color: var(--spec-2);
+  }
+  .callout-warn .callout-title { color: var(--spec-2); }
+  .callout-spec {
+    background: rgba(255,92,138,0.05);
+    border-color: var(--spec-1);
+  }
+  .callout-spec .callout-title { color: var(--spec-1); }
+  .callout-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 12px;
+    margin-bottom: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.6px;
+  }
+
+  /* ─── TECH BADGES ─── */
+  .tech-stack { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0; }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    border: 1px solid;
+    letter-spacing: 0.4px;
+  }
+  .badge-sol { background: rgba(98,126,234,0.08); border-color: rgba(98,126,234,0.3); color: #8ba0e8; }
+  .badge-ts { background: rgba(109,211,190,0.08); border-color: rgba(109,211,190,0.3); color: var(--spec-4); }
+  .badge-react { background: rgba(109,140,255,0.08); border-color: rgba(109,140,255,0.3); color: var(--spec-5); }
+  .badge-infra { background: rgba(184,126,255,0.08); border-color: rgba(184,126,255,0.3); color: var(--spec-6); }
+  .badge-foundry { background: rgba(255,154,61,0.08); border-color: rgba(255,154,61,0.3); color: var(--spec-2); }
+
+  /* ─── TOC ─── */
+  .toc {
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    padding: 36px;
+    margin: 48px 0;
+    position: relative;
+  }
+  .toc::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--gradient-spectrum);
+    border-radius: 12px 12px 0 0;
+    opacity: 0.5;
+  }
+  .toc h3 { margin: 0 0 20px; border: none; padding: 0; font-size: 20px; }
+  .toc h3::after { display: none; }
+  .toc ol { list-style: none; counter-reset: toc; padding-left: 0; margin: 0; }
+  .toc > ol > li {
+    counter-increment: toc;
+    margin-bottom: 10px;
+  }
+  .toc > ol > li::before {
+    content: counter(toc, decimal-leading-zero);
+    color: var(--accent-rose);
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    margin-right: 14px;
+    letter-spacing: 0.6px;
+  }
+  .toc a {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-family: 'Newsreader', serif;
+    font-size: 15px;
+    font-weight: 500;
+    transition: color 0.2s;
+  }
+  .toc a:hover { color: var(--accent-rose); }
+  .toc ol ol {
+    padding-left: 38px;
+    margin-top: 6px;
+  }
+  .toc ol ol li {
+    margin-bottom: 4px;
+    font-size: 13px;
+  }
+  .toc ol ol li::before { content: none; }
+  .toc ol ol li a { color: var(--text-muted); font-size: 13.5px; }
+  .toc ol ol li a::before {
+    content: '›';
+    margin-right: 8px;
+    color: var(--accent-rose);
+  }
+
+  /* ─── GRIDS ─── */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin: 24px 0; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; margin: 24px 0; }
+  .grid-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 10px;
+    padding: 24px 26px;
+    position: relative;
+    transition: border-color 0.2s;
+  }
+  .grid-card:hover { border-color: rgba(255,92,138,0.3); }
+  .grid-card h5 {
+    font-family: 'Fraunces', serif;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-bright);
+    margin-bottom: 8px;
+    letter-spacing: -0.01em;
+    font-variation-settings: "opsz" 144;
+  }
+  .grid-card p { font-size: 14px; margin: 0; line-height: 1.6; }
+
+  /* ─── METRIC CARDS ─── */
+  .metric-card {
+    text-align: center;
+    padding: 30px 20px;
+  }
+  .metric-value {
+    font-family: 'Fraunces', serif;
+    font-size: 40px;
+    font-weight: 400;
+    color: var(--accent-mint);
+    line-height: 1;
+    letter-spacing: -0.03em;
+    font-variation-settings: "opsz" 144;
+    margin-bottom: 10px;
+  }
+  .metric-value.rose { color: var(--spec-1); }
+  .metric-value.amber { color: var(--spec-2); }
+  .metric-value.yellow { color: var(--spec-3); }
+  .metric-value.indigo { color: var(--spec-5); }
+  .metric-value.violet { color: var(--spec-6); }
+  .metric-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1.4px;
+  }
+
+  /* ─── DAY HEADER ─── */
+  .day-header {
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 14px;
+    padding: 32px 36px;
+    margin: 0 0 36px;
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    position: relative;
+    overflow: hidden;
+  }
+  .day-header::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 4px;
+  }
+  .day-header.d1::before { background: var(--spec-1); }
+  .day-header.d2::before { background: var(--spec-2); }
+  .day-header.d3::before { background: var(--spec-3); }
+  .day-header.d4::before { background: var(--spec-4); }
+  .day-header.d5::before { background: var(--spec-5); }
+  .day-header.d6::before { background: var(--spec-6); }
+  .day-header.d7::before { background: var(--gradient-spectrum); }
+
+  .day-number {
+    font-family: 'Fraunces', serif;
+    font-size: 72px;
+    font-weight: 300;
+    line-height: 0.9;
+    letter-spacing: -0.05em;
+    font-style: italic;
+    font-variation-settings: "opsz" 144, "SOFT" 50;
+    min-width: 110px;
+  }
+  .day-header.d1 .day-number { color: var(--spec-1); }
+  .day-header.d2 .day-number { color: var(--spec-2); }
+  .day-header.d3 .day-number { color: var(--spec-3); }
+  .day-header.d4 .day-number { color: var(--spec-4); }
+  .day-header.d5 .day-number { color: var(--spec-5); }
+  .day-header.d6 .day-number { color: var(--spec-6); }
+  .day-header.d7 .day-number {
+    background: var(--gradient-spectrum);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .day-info h3 { margin: 0 0 6px; padding: 0; border: none; font-size: 24px; }
+  .day-info h3::after { display: none; }
+  .day-info p { margin: 0; font-size: 14.5px; line-height: 1.6; color: var(--text-secondary); }
+  .day-info .focus {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    color: var(--text-muted);
+    font-size: 13px;
+    margin-top: 8px;
+    font-variation-settings: "opsz" 144;
+  }
+
+  /* ─── CHECKLIST ─── */
+  .checklist { list-style: none; padding: 0; margin: 20px 0; }
+  .checklist li {
+    padding: 10px 0 10px 32px;
+    position: relative;
+    color: var(--text-secondary);
+    font-size: 14.5px;
+    border-bottom: 1px solid rgba(34,34,58,0.5);
+    line-height: 1.55;
+  }
+  .checklist li::before {
+    content: '☐';
+    position: absolute;
+    left: 0;
+    color: var(--accent-rose);
+    font-size: 18px;
+    line-height: 1;
+    top: 9px;
+  }
+  .checklist li:last-child { border-bottom: none; }
+  .checklist li code {
+    font-size: 12px;
+    padding: 1px 6px;
+  }
+  .checklist li strong {
+    color: var(--text-bright);
+    font-weight: 600;
+  }
+
+  /* ─── MoSCoW pill ─── */
+  .pill {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    border: 1px solid;
+    font-weight: 600;
+    margin-right: 4px;
+  }
+  .pill.must { color: var(--spec-1); border-color: var(--spec-1); background: rgba(255,92,138,0.05); }
+  .pill.should { color: var(--spec-2); border-color: var(--spec-2); background: rgba(255,154,61,0.05); }
+  .pill.could { color: var(--spec-4); border-color: var(--spec-4); background: rgba(109,211,190,0.05); }
+  .pill.wont { color: var(--text-muted); border-color: var(--text-muted); }
+
+  /* ─── footer ─── */
+  .doc-footer {
+    text-align: center;
+    padding: 56px 0;
+    border-bottom: none;
+    color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.5px;
+    line-height: 2;
+  }
+  .doc-footer .sig {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: 24px;
+    color: var(--text-secondary);
+    margin-bottom: 16px;
+    text-transform: none;
+    letter-spacing: -0.01em;
+    font-variation-settings: "opsz" 144;
+  }
+
+  @media (max-width: 900px) {
+    .hero h1 { font-size: 52px; }
+    h2 { font-size: 32px; }
+    h3 { font-size: 20px; }
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    .hero-meta { flex-direction: column; gap: 16px; }
+    .day-header { flex-direction: column; text-align: center; padding: 24px; }
+    .day-number { font-size: 60px; min-width: auto; }
+    .hero-prism-bg { display: none; }
+    .container { padding: 0 20px; }
+  }
+
+  .mermaid svg { max-width: 100%; }
+
+  /* Print */
+  @media print {
+    body::before { display: none; }
+    .hero { page-break-after: always; }
+    .section { page-break-inside: avoid; }
+    .day-header { page-break-inside: avoid; }
+    pre, .diagram-wrapper, .callout { page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     HERO SECTION
+     ═══════════════════════════════════════════════════════════════════ -->
+<div class="spectrum-bar"></div>
+<header class="hero">
+  <div class="container hero-content">
+    <div class="hero-badge">Product Requirements &amp; Development Plan · v1.0</div>
+    <h1>PRISM<span class="accent">.</span></h1>
+    <p class="hero-subtitle">
+      A permissionless, automated liquidity management protocol built on Uniswap V4 —
+      shaping capital into configurable tick-range distributions, rebalancing atomically via
+      flash accounting, adapting swap fees to realized volatility, and capturing MEV that
+      would otherwise leak to external arbitrageurs. Built in 7 days with Claude.
+    </p>
+    <div class="hero-meta">
+      <div class="hero-meta-item">
+        <span class="label">Stack</span>
+        <span class="value">Solidity + Next.js + TypeScript</span>
+      </div>
+      <div class="hero-meta-item">
+        <span class="label">Team</span>
+        <span class="value">Solo Developer</span>
+      </div>
+      <div class="hero-meta-item">
+        <span class="label">Target Chain</span>
+        <span class="value">Base Sepolia</span>
+      </div>
+      <div class="hero-meta-item">
+        <span class="label">Day-7 Deliverable</span>
+        <span class="value">Public Testnet Launch</span>
+      </div>
+      <div class="hero-meta-item">
+        <span class="label">Build Window</span>
+        <span class="value">7 Days · Solo + Claude</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Prism visual -->
+  <div class="hero-prism-bg" aria-hidden="true">
+    <svg viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="ray1" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#ff5c8a" stop-opacity="0.9"/>
+          <stop offset="100%" stop-color="#ff5c8a" stop-opacity="0"/>
+        </linearGradient>
+        <linearGradient id="ray2" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#ff9a3d" stop-opacity="0.8"/>
+          <stop offset="100%" stop-color="#ff9a3d" stop-opacity="0"/>
+        </linearGradient>
+        <linearGradient id="ray3" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#f0d860" stop-opacity="0.7"/>
+          <stop offset="100%" stop-color="#f0d860" stop-opacity="0"/>
+        </linearGradient>
+        <linearGradient id="ray4" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#6dd3be" stop-opacity="0.7"/>
+          <stop offset="100%" stop-color="#6dd3be" stop-opacity="0"/>
+        </linearGradient>
+        <linearGradient id="ray5" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#6d8cff" stop-opacity="0.7"/>
+          <stop offset="100%" stop-color="#6d8cff" stop-opacity="0"/>
+        </linearGradient>
+        <linearGradient id="ray6" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#b87eff" stop-opacity="0.6"/>
+          <stop offset="100%" stop-color="#b87eff" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      <polygon points="200,70 340,310 60,310" fill="none" stroke="#ebe5d5" stroke-opacity="0.25" stroke-width="1"/>
+      <g transform="translate(200 200)">
+        <line x1="-200" y1="0" x2="0" y2="0" stroke="#ebe5d5" stroke-opacity="0.4" stroke-width="1"/>
+        <line x1="0" y1="0" x2="200" y2="-50" stroke="url(#ray1)" stroke-width="1.5"/>
+        <line x1="0" y1="0" x2="200" y2="-20" stroke="url(#ray2)" stroke-width="1.5"/>
+        <line x1="0" y1="0" x2="200" y2="10" stroke="url(#ray3)" stroke-width="1.5"/>
+        <line x1="0" y1="0" x2="200" y2="40" stroke="url(#ray4)" stroke-width="1.5"/>
+        <line x1="0" y1="0" x2="200" y2="70" stroke="url(#ray5)" stroke-width="1.5"/>
+        <line x1="0" y1="0" x2="200" y2="100" stroke="url(#ray6)" stroke-width="1.5"/>
+      </g>
+    </svg>
+  </div>
+</header>
+
+<main class="container">
+
+<!-- ─── TABLE OF CONTENTS ─── -->
+<nav class="toc">
+  <h3>Table of Contents</h3>
+  <ol>
+    <li><a href="#s1">System Overview &amp; Design Philosophy</a></li>
+    <li><a href="#s2">High-Level System Architecture</a>
+      <ol>
+        <li><a href="#s2a">Topology Diagram</a></li>
+        <li><a href="#s2b">Hot-Path Sequence — Swap with Hook</a></li>
+        <li><a href="#s2c">Atomic Rebalance Sequence</a></li>
+      </ol>
+    </li>
+    <li><a href="#s3">Day 1 — Foundation &amp; Contract Scaffolding</a>
+      <ol>
+        <li><a href="#s3a">Monorepo &amp; Foundry Workspace</a></li>
+        <li><a href="#s3b">Core Interfaces &amp; Errors</a></li>
+        <li><a href="#s3c">Frontend Scaffold &amp; Wallet</a></li>
+      </ol>
+    </li>
+    <li><a href="#s4">Day 2 — Vault Core &amp; Share Mechanics</a>
+      <ol>
+        <li><a href="#s4a">ERC-20 Shares &amp; Value Accounting</a></li>
+        <li><a href="#s4b">Deposit &amp; Withdraw Flows</a></li>
+        <li><a href="#s4c">Inflation Attack Protection</a></li>
+      </ol>
+    </li>
+    <li><a href="#s5">Day 3 — Strategy System: Bell Shape</a>
+      <ol>
+        <li><a href="#s5a">IStrategy Contract</a></li>
+        <li><a href="#s5b">BellStrategy Implementation</a></li>
+        <li><a href="#s5c">Multi-Position Vault Refactor</a></li>
+      </ol>
+    </li>
+    <li><a href="#s6">Day 4 — ProtocolHook: Dynamic Fees &amp; MEV</a>
+      <ol>
+        <li><a href="#s6a">Hook Address Mining</a></li>
+        <li><a href="#s6b">beforeSwap — Volatility-Adaptive Fees</a></li>
+        <li><a href="#s6c">afterSwap — MEV Observation &amp; Capture</a></li>
+      </ol>
+    </li>
+    <li><a href="#s7">Day 5 — Testnet Deploy &amp; Frontend Integration</a>
+      <ol>
+        <li><a href="#s7a">Deploy Script &amp; Pool Initialization</a></li>
+        <li><a href="#s7b">wagmi Hooks &amp; Contract Reads</a></li>
+        <li><a href="#s7c">Prism Visualization Component</a></li>
+      </ol>
+    </li>
+    <li><a href="#s8">Day 6 — Keeper, Hardening &amp; E2E</a>
+      <ol>
+        <li><a href="#s8a">TypeScript Keeper Bot</a></li>
+        <li><a href="#s8b">Invariant Tests &amp; Static Analysis</a></li>
+        <li><a href="#s8c">Playwright End-to-End</a></li>
+      </ol>
+    </li>
+    <li><a href="#s9">Day 7 — Public Testnet Launch</a>
+      <ol>
+        <li><a href="#s9a">Go-Live Runbook</a></li>
+        <li><a href="#s9b">Monitoring &amp; Demo</a></li>
+      </ol>
+    </li>
+    <li><a href="#s10">V4 Hook Permission Flags Matrix</a></li>
+    <li><a href="#s11">Gas Targets &amp; Performance Benchmarks</a></li>
+    <li><a href="#s12">Repository Structure</a></li>
+    <li><a href="#s13">Risk Management &amp; Security</a></li>
+    <li><a href="#s14">Post-Sprint Roadmap &amp; Sustainability</a></li>
+  </ol>
+</nav>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     SECTION 1 — SYSTEM OVERVIEW
+     ═══════════════════════════════════════════════════════════════════ -->
+<section class="section" id="s1">
+  <div class="section-label">Section 01</div>
+  <h2>System Overview &amp; Design Philosophy</h2>
+
+  <p>
+    <strong>PRISM</strong> wraps a Uniswap V4 pool with a vault contract that refracts LP capital into a
+    configurable spectrum of tick-range positions. Where Uniswap V3 made liquidity provision capital-efficient but
+    operationally brutal, and where active managers like Gamma V2 smoothed out the day-to-day but remained
+    bottlenecked by centralized advisors, PRISM uses V4's hook primitive and flash-accounting to push the entire
+    management loop on-chain: deposit once, rebalance atomically, charge volatility-adaptive fees, and recapture
+    MEV that would otherwise bleed to external arbitrageurs.
+  </p>
+
+  <p>
+    The system is designed for a <strong>7-day solo build sprint</strong> with Claude as a development partner. Each
+    day delivers a fully functional, testable layer — no day depends on unfinished work from the next. The sprint
+    culminates in a <strong>public Base Sepolia testnet launch</strong> on Day 7, with a capped-deposit soft-launch
+    path available for Base mainnet once the testnet run has stabilized for 1–2 weeks.
+  </p>
+
+  <h3>Core Design Principles</h3>
+
+  <div class="grid-3">
+    <div class="grid-card">
+      <h5>Refraction as a Metaphor</h5>
+      <p>One LP deposit is refracted into N tick-range positions via a pluggable <code>IStrategy</code>. Bell, exponential, and order-book shapes are three spectrums of the same underlying capital.</p>
+    </div>
+    <div class="grid-card">
+      <h5>Custody-Free Automation</h5>
+      <p>No advisor, no admin-held keys on user funds. Rebalances are keeper-triggered permissionlessly; the strategy decides whether they happen. Users retain full withdrawal rights at all times.</p>
+    </div>
+    <div class="grid-card">
+      <h5>Hook-Native from Day One</h5>
+      <p>PRISM is not retrofitted onto V3-style liquidity. Dynamic fees via <code>beforeSwap</code>, MEV capture via <code>afterSwap</code>, and flash-accounted atomic rebalances are intrinsic to the design.</p>
+    </div>
+    <div class="grid-card">
+      <h5>Immutable Core</h5>
+      <p>No upgrade proxies in v1. If a critical bug is found, contracts are redeployed and users migrate. This removes governance-as-attack-surface in exchange for upfront rigor.</p>
+    </div>
+    <div class="grid-card">
+      <h5>Solo-Buildable</h5>
+      <p>Scope is cut to what a solo dev can ship in 7 days without cutting corners on security. Advanced features (MEV execution, indexer, multi-chain, multi-strategy) are post-sprint, not hidden debt.</p>
+    </div>
+    <div class="grid-card">
+      <h5>Composable ERC-20</h5>
+      <p>Vault shares are standard ERC-20 — transferable, tradeable, collateral-izable. No transfer hooks, no fees on shares, no opinions about what downstream protocols do with them.</p>
+    </div>
+  </div>
+
+  <h3>Technology Stack</h3>
+
+  <table>
+    <thead>
+      <tr><th>Concern</th><th>Technology</th><th>Rationale</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Smart contracts</td>
+        <td><span class="badge badge-sol">Solidity 0.8.25</span></td>
+        <td>EIP-1153 transient storage required for V4 flash accounting. PUSH0 opcode. Custom errors.</td>
+      </tr>
+      <tr>
+        <td>Contract framework</td>
+        <td><span class="badge badge-foundry">Foundry</span></td>
+        <td>Fastest iteration cycle, first-class fuzz + invariant testing, fork tests, native deploy scripts.</td>
+      </tr>
+      <tr>
+        <td>V4 dependencies</td>
+        <td><span class="badge badge-sol">v4-core + v4-periphery</span></td>
+        <td>PoolManager singleton, IHooks interface, CurrencyDelta accounting. Pinned to a specific commit Day 1.</td>
+      </tr>
+      <tr>
+        <td>Token utilities</td>
+        <td><span class="badge badge-sol">Solmate / Solady</span></td>
+        <td>Gas-optimized ERC-20, SafeTransferLib, FixedPointMathLib. Mature audited.</td>
+      </tr>
+      <tr>
+        <td>Static analysis</td>
+        <td><span class="badge badge-foundry">Slither + Aderyn</span></td>
+        <td>Pre-merge CI gate. Aderyn catches what Slither misses and vice versa.</td>
+      </tr>
+      <tr>
+        <td>Frontend framework</td>
+        <td><span class="badge badge-react">Next.js 14 App Router</span></td>
+        <td>RSC, streaming, Vercel-native. Marketing + dApp on one domain.</td>
+      </tr>
+      <tr>
+        <td>Web3 layer</td>
+        <td><span class="badge badge-ts">wagmi v2 + viem v2</span></td>
+        <td>Tree-shakeable, type-safe, successor to ethers.js.</td>
+      </tr>
+      <tr>
+        <td>Wallet UX</td>
+        <td><span class="badge badge-react">RainbowKit v2</span></td>
+        <td>Out-of-box wallet connector, network switching, mobile deep-links.</td>
+      </tr>
+      <tr>
+        <td>UI primitives</td>
+        <td><span class="badge badge-react">shadcn/ui + Tailwind</span></td>
+        <td>Radix-based accessible primitives, code owned (not imported), Tailwind utility CSS.</td>
+      </tr>
+      <tr>
+        <td>Keeper</td>
+        <td><span class="badge badge-ts">TypeScript + viem</span></td>
+        <td>Single-file bot, polls via viem, simulates with <code>eth_call</code>, submits if profitable.</td>
+      </tr>
+      <tr>
+        <td>Monorepo</td>
+        <td><span class="badge badge-infra">pnpm + Turborepo</span></td>
+        <td>Workspaces for web/keeper/contracts, shared ABIs and types, parallel cached builds.</td>
+      </tr>
+      <tr>
+        <td>Deploy targets</td>
+        <td><span class="badge badge-infra">Vercel + Fly.io</span></td>
+        <td>Frontend on Vercel (free tier), keeper on Fly.io (hobby plan).</td>
+      </tr>
+      <tr>
+        <td>Monitoring</td>
+        <td><span class="badge badge-infra">Tenderly + Sentry</span></td>
+        <td>On-chain tx alerts via Tenderly, frontend errors via Sentry. Both free tier.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout callout-info">
+    <div class="callout-title">Why Base Sepolia for Day 7</div>
+    <p>
+      Base Sepolia has first-class Uniswap V4 support (canonical PoolManager deployed), cheap test ETH, and a direct
+      migration path to Base mainnet via the same deploy script with different addresses. A Day-7 Sepolia launch gives
+      real observable behavior on a real chain, external users can deposit test tokens, and the 1–2 week observation
+      window post-Day-7 creates the evidence base required to responsibly flip to mainnet in Week 2 or 3.
+    </p>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     SECTION 2 — HIGH-LEVEL ARCHITECTURE
+     ═══════════════════════════════════════════════════════════════════ -->
+<section class="section" id="s2">
+  <div class="section-label">Section 02</div>
+  <h2>High-Level System Architecture</h2>
+
+  <p>
+    The system is organized into four layers: the <strong>user layer</strong> (LPs, swappers, keepers), the
+    <strong>presentation layer</strong> (Next.js dApp + wagmi), the <strong>protocol layer</strong> (Vault, Strategy,
+    Hook contracts), and the <strong>Uniswap V4 layer</strong> (PoolManager singleton). Every vault operation is an
+    unlock-callback into PoolManager; every swap through a PRISM-hooked pool routes through the hook's
+    <code>beforeSwap</code> and <code>afterSwap</code> callbacks. There is no off-chain state in the critical path.
+  </p>
+
+  <div class="diagram-wrapper" id="s2a">
+    <div class="mermaid">
+graph TB
+    subgraph USERS["USER LAYER"]
+        LP["Liquidity Providers<br/>deposit / withdraw"]
+        SW["Swappers<br/>trade through pool"]
+        KP["Keepers<br/>trigger rebalance"]
+    end
+
+    subgraph FRONTEND["PRESENTATION LAYER -- Next.js"]
+        UI["dApp UI<br/>vault detail + deposit"]
+        WAG["wagmi + viem<br/>contract reads / writes"]
+        RK["RainbowKit<br/>wallet connect"]
+    end
+
+    subgraph CORE["PROTOCOL LAYER -- Solidity"]
+        direction TB
+        VF["VaultFactory<br/>CREATE2 deploy"]
+        V["Vault<br/>ERC-20 shares + multi-position"]
+        S["BellStrategy<br/>shape + rebalance trigger"]
+        H["ProtocolHook<br/>beforeSwap + afterSwap"]
+        OR["ChainlinkAdapter<br/>external price reference"]
+    end
+
+    subgraph V4["UNISWAP V4"]
+        PM["PoolManager<br/>singleton"]
+        POOL["ETH-USDC Pool<br/>dynamic fee + hook"]
+    end
+
+    subgraph INFRA["OFF-CHAIN INFRA"]
+        KB["Keeper Bot<br/>TypeScript + viem"]
+        TN["Tenderly<br/>tx monitoring"]
+        ST["Sentry<br/>frontend errors"]
+    end
+
+    LP --> UI
+    SW --> PM
+    KP --> KB
+    UI --> WAG
+    WAG --> V
+    RK --> WAG
+    V --> S
+    V --> PM
+    V -.delegates shape.-> S
+    PM --> POOL
+    POOL --> H
+    H --> OR
+    KB --> V
+    V --> TN
+    UI --> ST
+
+    style USERS fill:#1a1622,stroke:#9690a3,stroke-width:1px,color:#ebe5d5
+    style FRONTEND fill:#1a1420,stroke:#6d8cff,stroke-width:2px,color:#ebe5d5
+    style CORE fill:#1f1520,stroke:#ff5c8a,stroke-width:2px,color:#ebe5d5
+    style V4 fill:#1a1f1a,stroke:#6dd3be,stroke-width:2px,color:#ebe5d5
+    style INFRA fill:#1f1a1a,stroke:#ff9a3d,stroke-width:1px,color:#ebe5d5
+    </div>
+    <div class="diagram-caption">Figure 2.1 — System Topology: User Layer → Presentation → Protocol → Uniswap V4</div>
+  </div>
+
+  <h3 id="s2b">Hot-Path Sequence: Swap Through a PRISM-Hooked Pool</h3>
+
+  <p>
+    Every swap against a PRISM-hooked pool triggers the full hook lifecycle. Dynamic fee computation occurs pre-swap;
+    MEV observation and optional backrun occurs post-swap. Both are bounded operations with gas budgets.
+  </p>
+
+  <div class="diagram-wrapper">
+    <div class="mermaid">
+sequenceDiagram
+    participant U as Swapper
+    participant PM as PoolManager
+    participant H as ProtocolHook
+    participant O as ChainlinkAdapter
+    participant V as Vault State
+
+    U->>PM: swap(PoolKey, SwapParams)
+    activate PM
+    PM->>H: beforeSwap(sender, key, params)
+    activate H
+    H->>H: updateVolatility(tick)
+    H->>H: calculateDynamicFee(ewmaShort, ewmaLong)
+    H-->>PM: (selector, ZERO_DELTA, fee | OVERRIDE_FLAG)
+    deactivate H
+
+    PM->>PM: execute swap with dynamic fee
+    PM->>H: afterSwap(sender, key, params, delta)
+    activate H
+    H->>O: getExternalPrice()
+    O-->>H: Chainlink priceX96
+    H->>H: evaluateBackrun(poolPrice, extPrice)
+    alt deviation greater than threshold (v1.1+)
+        H->>PM: swap(correctiveParams)
+        PM-->>H: backrunDelta
+        H->>V: accountProfit(vault, amount)
+    else v1.0 (MVP)
+        H->>H: emit SwapObserved(...)
+    end
+    H-->>PM: (selector, hookDelta)
+    deactivate H
+
+    PM-->>U: token transfers at settlement
+    deactivate PM
+    </div>
+    <div class="diagram-caption">Figure 2.2 — Hot-Path Sequence: Swap → beforeSwap fee override → afterSwap MEV capture</div>
+  </div>
+
+  <div class="callout callout-perf">
+    <div class="callout-title">Hook Gas Budget</div>
+    <p><strong>beforeSwap:</strong> &le; 12k gas — EWMA update (3 SSTOREs), fee calc (arithmetic + clamp), return. <strong>afterSwap (MVP):</strong> &le; 15k gas — oracle read (1 SLOAD + 1 external call), deviation check, event emit. <strong>afterSwap (v1.1 with backrun):</strong> &le; 80k gas — oracle + optional swap + accounting. <strong>Total hook overhead per swap:</strong> ~25k gas MVP, ~90k with active MEV capture — acceptable margin vs. expected backrun yield.</p>
+  </div>
+
+  <h3 id="s2c">Atomic Rebalance via Flash Accounting</h3>
+
+  <p>
+    The entire rebalance — remove all positions, collect fees, internal swap to target ratio, deploy new positions — executes inside a single <code>PoolManager.unlock()</code> callback. EIP-1153 transient storage tracks the currency deltas; tokens only physically transfer when the net delta settles at the end. A N-position rebalance touches each token balance exactly <em>once</em>, not <code>2N</code> times.
+  </p>
+
+  <div class="diagram-wrapper">
+    <div class="mermaid">
+sequenceDiagram
+    participant K as Keeper
+    participant V as Vault
+    participant PM as PoolManager
+    participant S as Strategy
+
+    K->>V: rebalance()
+    activate V
+    V->>S: shouldRebalance(tick, lastTick, ts)
+    S-->>V: true
+    V->>PM: unlock(data)
+    activate PM
+
+    Note over V,PM: unlockCallback enters
+
+    loop For each existing position
+        V->>PM: modifyLiquidity(tickLower, tickUpper, -liq)
+        PM-->>V: delta credit (token0, token1)
+    end
+
+    V->>V: getTotalAssetsFromDeltas()
+    V->>S: computePositions(tick, total0, total1)
+    S-->>V: TargetPosition[] (ticks, weights)
+
+    opt Token ratio mismatch vs. target
+        V->>PM: swap(excess token, slippage-bounded)
+        PM-->>V: swap delta
+    end
+
+    loop For each target position
+        V->>PM: modifyLiquidity(newLower, newUpper, +liq)
+        PM-->>V: delta debit
+    end
+
+    V->>PM: settle net currency deltas
+    PM-->>V: single token transfer per currency
+    deactivate PM
+
+    V->>V: emit Rebalanced(oldTick, newTick, nPositions)
+    V-->>K: success + bonus
+    deactivate V
+    </div>
+    <div class="diagram-caption">Figure 2.3 — Atomic Rebalance: N positions touched, 1 net token transfer per asset</div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     SECTION 3 — DAY 1
+     ═══════════════════════════════════════════════════════════════════ -->
+<section class="section" id="s3">
+  <div class="section-label">Day 01</div>
+  <h2>Foundation &amp; Contract Scaffolding</h2>
+
+  <div class="day-header d1">
+    <div class="day-number">01</div>
+    <div class="day-info">
+      <h3>Foundations — Monorepo, Interfaces, Wallet Connect</h3>
+      <p>Stand up the pnpm monorepo with Foundry for contracts and Next.js for the dApp. Pin v4-core to a specific commit. Define the three core interfaces — <code>IVault</code>, <code>IStrategy</code>, <code>IProtocolHook</code> — and the error library that every contract inherits from. Get wallet-connect working on Base Sepolia.</p>
+      <p class="focus">Focus: Green CI, green contracts stub, green frontend stub. Nothing in production; everything in motion.</p>
+    </div>
+  </div>
+
+  <h3 id="s3a">Monorepo &amp; Foundry Workspace</h3>
+
+  <p>The monorepo uses pnpm workspaces for TypeScript packages and a nested Foundry project for contracts. Turborepo orchestrates parallel builds and caches results between runs.</p>
+
+  <span class="code-label yaml">pnpm-workspace.yaml</span>
+<pre><code>packages:
+  - 'apps/*'
+  - 'packages/*'</code></pre>
+
+  <span class="code-label json">turbo.json</span>
+<pre><code>{
+  "$schema": "https://turbo.build/schema.json",
+  "tasks": {
+    "build":   { "dependsOn": ["^build"], "outputs": [".next/**", "dist/**"] },
+    "test":    { "dependsOn": ["^build"] },
+    "lint":    {},
+    "typecheck": { "dependsOn": ["^build"] },
+    "dev":     { "cache": false, "persistent": true }
+  }
+}</code></pre>
+
+  <span class="code-label toml">packages/contracts/foundry.toml</span>
+<pre><code>[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+solc = "0.8.25"
+optimizer = true
+optimizer_runs = 200
+via_ir = true
+evm_version = "cancun"
+fs_permissions = [{ access = "read-write", path = "./" }]
+
+[fmt]
+line_length = 120
+tab_width = 4
+bracket_spacing = false
+
+[rpc_endpoints]
+base_sepolia = "${BASE_SEPOLIA_RPC}"
+base         = "${BASE_RPC}"
+
+[etherscan]
+base_sepolia = { key = "${BASESCAN_API_KEY}", chain = 84532 }
+base         = { key = "${BASESCAN_API_KEY}", chain = 8453 }</code></pre>
+
+  <span class="code-label bash">Initial setup</span>
+<pre><code># Monorepo init
+pnpm init
+pnpm add -D turbo typescript
+
+# Foundry project
+cd packages/contracts
+forge init --no-commit --force
+
+# V4 dependencies — pin commit!
+forge install Uniswap/v4-core --no-commit
+forge install Uniswap/v4-periphery --no-commit
+forge install transmissions11/solmate --no-commit
+forge install OpenZeppelin/openzeppelin-contracts --no-commit
+
+# Pin to specific commits in .gitmodules
+# (critical — do not allow v4-core to drift mid-sprint)
+
+# Next.js app
+cd ../../apps/web
+pnpm create next-app@latest . --typescript --tailwind --app --no-src-dir
+
+# Web3 dependencies
+pnpm add wagmi viem @rainbow-me/rainbowkit @tanstack/react-query</code></pre>
+
+  <h3 id="s3b">Core Interfaces &amp; Errors</h3>
+
+  <p>
+    Every contract in PRISM speaks through these three interfaces. Defining them on Day 1 — even before
+    implementations exist — forces us to think in terms of contracts, not functions. The <code>Errors</code> library
+    centralizes custom error types so every revert costs ~200 gas (selector only) instead of the 2000+ of string
+    reverts.
+  </p>
+
+  <span class="code-label sol">packages/contracts/src/interfaces/IVault.sol</span>
+<pre><code>// SPDX-License-Identifier: BUSL-1.1
+pragma solidity ^0.8.25;
+
+import {IERC20} from "openzeppelin-contracts/token/ERC20/IERC20.sol";
+import {PoolKey} from "v4-core/types/PoolKey.sol";
+
+/// @notice Vault interface — multi-position LP aggregator on top of a V4 pool
+interface IVault is IERC20 {
+    /// @notice Single tick-range position tracked by the vault
+    struct Position {
+        int24 tickLower;
+        int24 tickUpper;
+        uint128 liquidity;
+    }
+
+    event Deposit(address indexed user, uint256 amount0, uint256 amount1, uint256 shares);
+    event Withdraw(address indexed user, uint256 amount0, uint256 amount1, uint256 shares);
+    event Rebalanced(int24 tick, uint256 nPositions, uint256 gasUsed);
+    event FeesCollected(uint256 fees0, uint256 fees1);
+
+    /// @notice Deposit both tokens, receive ERC-20 shares proportional to deposit value.
+    /// @dev    Reverts if amount &lt; mins or if deposit would exceed TVL cap.
+    function deposit(
+        uint256 amount0Desired,
+        uint256 amount1Desired,
+        uint256 amount0Min,
+        uint256 amount1Min,
+        address to
+    ) external returns (uint256 shares, uint256 amount0, uint256 amount1);
+
+    /// @notice Burn shares to withdraw proportional share of all positions + idle balances.
+    /// @dev    Always callable, even when deposits are paused.
+    function withdraw(
+        uint256 shares,
+        uint256 amount0Min,
+        uint256 amount1Min,
+        address to
+    ) external returns (uint256 amount0, uint256 amount1);
+
+    /// @notice Permissionless rebalance trigger. Reverts if strategy.shouldRebalance() is false.
+    function rebalance() external;
+
+    /// @notice Current positions held by the vault
+    function getPositions() external view returns (Position[] memory);
+
+    /// @notice Total underlying assets (idle balances + in-range liquidity value)
+    function getTotalAmounts() external view returns (uint256 total0, uint256 total1);
+
+    /// @notice Pool this vault provides liquidity to
+    function poolKey() external view returns (PoolKey memory);
+}</code></pre>
+
+  <span class="code-label sol">packages/contracts/src/interfaces/IStrategy.sol</span>
+<pre><code>// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.25;
+
+/// @notice Strategy interface — defines liquidity shape and rebalance trigger
+interface IStrategy {
+    struct TargetPosition {
+        int24 tickLower;
+        int24 tickUpper;
+        uint256 weight;   // basis points, Sum(weight) MUST equal 10_000
+    }
+
+    /// @notice Compute N target positions given current tick and available assets.
+    /// @dev    Pure-ish: reads no vault state, only tick and amounts. Deterministic.
+    function computePositions(
+        int24 currentTick,
+        int24 tickSpacing,
+        uint256 amount0,
+        uint256 amount1
+    ) external view returns (TargetPosition[] memory positions);
+
+    /// @notice Whether the vault should rebalance right now.
+    /// @dev    Called as view, off-chain first (keeper simulation), then on-chain.
+    function shouldRebalance(
+        int24 currentTick,
+        int24 lastRebalanceTick,
+        uint256 lastRebalanceTimestamp
+    ) external view returns (bool);
+}</code></pre>
+
+  <span class="code-label sol">packages/contracts/src/interfaces/IProtocolHook.sol</span>
+<pre><code>// SPDX-License-Identifier: BUSL-1.1
+pragma solidity ^0.8.25;
+
+import {IHooks} from "v4-core/interfaces/IHooks.sol";
+
+/// @notice PRISM's hook — dynamic fees via beforeSwap, MEV observation via afterSwap
+interface IProtocolHook is IHooks {
+    event FeeUpdated(bytes32 indexed poolId, uint24 newFee, uint256 volatility);
+    event SwapObserved(bytes32 indexed poolId, int24 tick, uint160 sqrtPriceX96);
+    event MEVCaptured(address indexed vault, uint256 amount, bool isToken0);
+
+    /// @notice Register a vault against this hook's pool
+    function registerVault(address vault) external;
+
+    /// @notice Current dynamic fee for a pool (for UI display)
+    function currentFee(bytes32 poolId) external view returns (uint24);
+
+    /// @notice MEV profits accrued to a vault, awaiting distribution
+    function mevProfits(address vault) external view returns (uint256 amount0, uint256 amount1);
+}</code></pre>
+
+  <span class="code-label sol">packages/contracts/src/utils/Errors.sol</span>
+<pre><code>// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.25;
+
+/// @notice Centralized error library — 200 gas per revert instead of 2000+
+library Errors {
+    // Vault
+    error SlippageExceeded(uint256 actual, uint256 min);
+    error TVLCapExceeded(uint256 proposed, uint256 cap);
+    error DepositsPaused();
+    error RebalanceNotNeeded();
+    error InvalidShareAmount();
+    error ZeroShares();
+
+    // Strategy
+    error WeightsDoNotSum(uint256 actual);      // sum != 10_000
+    error MaxPositionsExceeded(uint256 requested);
+    error InvalidTickRange(int24 lower, int24 upper);
+
+    // Hook
+    error OnlyPoolManager();
+    error HookNotPermissioned(uint160 expected, uint160 actual);
+    error OracleStale(uint256 updatedAt);
+    error OracleDeviation(uint256 deviation);
+
+    // Access
+    error OnlyOwner();
+    error OnlyKeeper();
+    error ZeroAddress();
+}</code></pre>
+
+  <h3 id="s3c">Frontend Scaffold &amp; Wallet Connect</h3>
+
+  <p>The frontend is a single Next.js 14 app with App Router. Marketing lives at <code>/</code>, the dApp at <code>/app</code>. wagmi v2 + viem v2 form the Web3 spine; RainbowKit gives us a connected wallet UX without custom work.</p>
+
+  <span class="code-label tsx">apps/web/src/lib/wagmi.ts</span>
+<pre><code>import { http, createConfig } from 'wagmi';
+import { base, baseSepolia } from 'wagmi/chains';
+import { getDefaultConfig } from '@rainbow-me/rainbowkit';
+
+export const wagmiConfig = getDefaultConfig({
+  appName: 'PRISM',
+  projectId: process.env.NEXT_PUBLIC_WC_PROJECT_ID!,
+  chains: [baseSepolia, base],
+  transports: {
+    [baseSepolia.id]: http(process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC),
+    [base.id]:         http(process.env.NEXT_PUBLIC_BASE_RPC),
+  },
+  ssr: true,
+});</code></pre>
+
+  <span class="code-label tsx">apps/web/src/app/providers.tsx</span>
+<pre><code>'use client';
+import { WagmiProvider } from 'wagmi';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { RainbowKitProvider, darkTheme } from '@rainbow-me/rainbowkit';
+import { wagmiConfig } from '@/lib/wagmi';
+import '@rainbow-me/rainbowkit/styles.css';
+
+const qc = new QueryClient({
+  defaultOptions: { queries: { staleTime: 30_000 } },
+});
+
+export function Providers({ children }: { children: React.ReactNode }) {
+  return (
+    &lt;WagmiProvider config={wagmiConfig}&gt;
+      &lt;QueryClientProvider client={qc}&gt;
+        &lt;RainbowKitProvider
+          theme={darkTheme({
+            accentColor: '#ff5c8a',
+            accentColorForeground: '#0d0d13',
+            borderRadius: 'medium',
+          })}
+        &gt;
+          {children}
+        &lt;/RainbowKitProvider&gt;
+      &lt;/QueryClientProvider&gt;
+    &lt;/WagmiProvider&gt;
+  );
+}</code></pre>
+
+  <h3>Day 1 Deliverables Checklist</h3>
+  <ul class="checklist">
+    <li><span class="pill must">Must</span> Monorepo scaffolded: <code>apps/web</code>, <code>apps/keeper</code>, <code>packages/contracts</code>, <code>packages/shared</code></li>
+    <li><span class="pill must">Must</span> Foundry project with v4-core + v4-periphery + solmate + OZ <strong>pinned to specific commits</strong></li>
+    <li><span class="pill must">Must</span> <code>forge build</code> + <code>forge test</code> green on empty interfaces</li>
+    <li><span class="pill must">Must</span> <code>IVault</code>, <code>IStrategy</code>, <code>IProtocolHook</code>, <code>Errors</code> committed</li>
+    <li><span class="pill must">Must</span> Next.js app runs locally, wallet connects to Base Sepolia via RainbowKit</li>
+    <li><span class="pill must">Must</span> GitHub Actions CI green (lint, typecheck, build, test) on every PR</li>
+    <li><span class="pill should">Should</span> Deploy-preview on Vercel working</li>
+    <li><span class="pill should">Should</span> Basic landing page with PRISM hero + spectrum bar rendered</li>
+    <li><span class="pill should">Should</span> Shared ABI export pipeline (Foundry <code>out/</code> → <code>packages/shared/abi.ts</code>)</li>
+    <li><span class="pill could">Could</span> Start hook address miner (<code>HookMiner.sol</code>) stub</li>
+  </ul>
+
+  <div class="callout callout-warn">
+    <div class="callout-title">Critical Day-1 Discipline</div>
+    <p><strong>Pin v4-core to a specific commit in <code>.gitmodules</code>.</strong> Do not allow upstream changes mid-sprint — a breaking API change on day 4 would be fatal. Record the commit SHA in the README. Same rule applies to solmate and OZ: pin, don't float.</p>
+    <p><strong>Do not spend Day 1 on UI polish.</strong> The landing page only needs a hero, the dApp only needs the connect button. Every hour spent on animations today is an hour not spent on Vault.sol on Day 2.</p>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     SECTION 4 — DAY 2
+     ═══════════════════════════════════════════════════════════════════ -->
+<section class="section" id="s4">
+  <div class="section-label">Day 02</div>
+  <h2>Vault Core &amp; Share Mechanics</h2>
+
+  <div class="day-header d2">
+    <div class="day-number">02</div>
+    <div class="day-info">
+      <h3>Vault Core — Deposit, Withdraw, Share Math</h3>
+      <p>Build the <code>Vault.sol</code> contract with ERC-20 share mechanics, single-position deposit/withdraw, and <code>PositionLib</code> for liquidity↔amount conversions. Write unit tests for happy paths and for the share-inflation edge case. Deposit from the UI works end-to-end against a local Anvil fork.</p>
+      <p class="focus">Focus: Deposit in, shares minted, tokens visible. Single-position vault working on fork.</p>
+    </div>
+  </div>
+
+  <h3 id="s4a">ERC-20 Shares &amp; Value Accounting</h3>
+
+  <p>
+    Vault shares are minted pro-rata to deposit value relative to total vault value. Total value includes: idle token
+    balances, current value of all in-range liquidity positions at the active tick, and accrued-but-uncollected swap
+    fees. Using Solmate's ERC-20 base gets us efficient storage and <code>permit</code> for free.
+  </p>
+
+  <div class="diagram-wrapper">
+    <div class="mermaid">
+sequenceDiagram
+    participant LP as Liquidity Provider
+    participant V as Vault
+    participant PM as PoolManager
+    participant T0 as Token0
+    participant T1 as Token1
+
+    LP->>V: deposit(amount0, amount1, mins, to)
+    activate V
+    V->>V: _collectFees() -- settle outstanding
+    V->>V: (total0, total1) = getTotalAmounts()
+    V->>V: shares = deposit_value * totalSupply / total_value
+    V->>T0: transferFrom(LP, vault, amount0)
+    V->>T1: transferFrom(LP, vault, amount1)
+
+    alt First deposit
+        V->>V: _mint(DEAD_ADDRESS, MIN_SHARES)
+        Note over V: Prevent share inflation attack
+    end
+
+    V->>PM: unlock(encoded position params)
+    activate PM
+    PM-->>V: unlockCallback
+    V->>PM: modifyLiquidity(tickLower, tickUpper, +liq)
+    PM->>V: settle token deltas
+    deactivate PM
+
+    V->>V: _mint(to, shares)
+    V-->>LP: shares transferred
+    V->>V: emit Deposit(...)
+    deactivate V
+    </div>
+    <div class="diagram-caption">Figure 4.1 — Deposit Flow: token transfer → position deployment → share mint</div>
+  </div>
+
+  <h3 id="s4b">Deposit &amp; Withdraw Flows</h3>
+
+  <span class="code-label sol">packages/contracts/src/core/Vault.sol — deposit (abridged)</span>
+<pre><code>// SPDX-License-Identifier: BUSL-1.1
+pragma solidity ^0.8.25;
+
+import {ERC20} from "solmate/tokens/ERC20.sol";
+import {SafeTransferLib} from "solmate/utils/SafeTransferLib.sol";
+import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
+import {PoolKey} from "v4-core/types/PoolKey.sol";
+import {FullMath} from "v4-core/libraries/FullMath.sol";
+import {Errors} from "../utils/Errors.sol";
+import {ReentrancyGuardTransient} from "../utils/ReentrancyGuardTransient.sol";
+
+contract Vault is ERC20, ReentrancyGuardTransient {
+    using SafeTransferLib for ERC20;
+
+    uint256 public constant MAX_POSITIONS = 30;
+    uint256 public constant MIN_SHARES    = 1_000; // burned to DEAD on first deposit
+    address public constant DEAD          = 0x000000000000000000000000000000000000dEaD;
+
+    IPoolManager public immutable poolManager;
+    IStrategy    public immutable strategy;
+    PoolKey      public poolKey;
+    uint256      public tvlCap;
+    bool         public depositsPaused;
+
+    Position[] public positions;
+    int24      public lastRebalanceTick;
+    uint256    public lastRebalanceTimestamp;
+
+    struct Position {
+        int24   tickLower;
+        int24   tickUpper;
+        uint128 liquidity;
+    }
+
+    // ... constructor, modifiers omitted ...
+
+    function deposit(
+        uint256 amount0Desired,
+        uint256 amount1Desired,
+        uint256 amount0Min,
+        uint256 amount1Min,
+        address to
+    ) external nonReentrant returns (uint256 shares, uint256 amount0, uint256 amount1) {
+        if (depositsPaused) revert Errors.DepositsPaused();
+
+        _collectFees();
+        (uint256 total0, uint256 total1) = getTotalAmounts();
+
+        uint256 _totalSupply = totalSupply;
+        if (_totalSupply == 0) {
+            // First depositor: seed shares equal to geometric mean, burn MIN_SHARES
+            shares = FullMath.mulDiv(amount0Desired, amount1Desired, 1e18).sqrt();
+            if (shares &lt;= MIN_SHARES) revert Errors.ZeroShares();
+            _mint(DEAD, MIN_SHARES);
+            shares -= MIN_SHARES;
+            amount0 = amount0Desired;
+            amount1 = amount1Desired;
+        } else {
+            // Subsequent: pro-rata to total vault value
+            uint256 shares0 = total0 == 0 ? type(uint256).max
+                : FullMath.mulDiv(amount0Desired, _totalSupply, total0);
+            uint256 shares1 = total1 == 0 ? type(uint256).max
+                : FullMath.mulDiv(amount1Desired, _totalSupply, total1);
+            shares = shares0 &lt; shares1 ? shares0 : shares1;
+            amount0 = total0 == 0 ? amount0Desired
+                : FullMath.mulDiv(shares, total0, _totalSupply);
+            amount1 = total1 == 0 ? amount1Desired
+                : FullMath.mulDiv(shares, total1, _totalSupply);
+        }
+
+        if (amount0 &lt; amount0Min || amount1 &lt; amount1Min) {
+            revert Errors.SlippageExceeded(amount0 &lt; amount0Min ? amount0 : amount1,
+                                            amount0 &lt; amount0Min ? amount0Min : amount1Min);
+        }
+        if (total0 + amount0 &gt; tvlCap) revert Errors.TVLCapExceeded(total0 + amount0, tvlCap);
+
+        ERC20(Currency.unwrap(poolKey.currency0)).safeTransferFrom(msg.sender, address(this), amount0);
+        ERC20(Currency.unwrap(poolKey.currency1)).safeTransferFrom(msg.sender, address(this), amount1);
+
+        _deployLiquidity(amount0, amount1); // unlock + modifyLiquidity across positions
+
+        _mint(to, shares);
+        emit Deposit(msg.sender, amount0, amount1, shares);
+    }
+}</code></pre>
+
+  <span class="code-label sol">packages/contracts/src/libraries/PositionLib.sol — key functions</span>
+<pre><code>// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.25;
+
+import {TickMath}         from "v4-core/libraries/TickMath.sol";
+import {LiquidityAmounts}  from "v4-periphery/libraries/LiquidityAmounts.sol";
+import {FullMath}          from "v4-core/libraries/FullMath.sol";
+
+/// @notice Pure math library: tick/price conversions and liquidity sizing
+library PositionLib {
+    /// @notice Given desired amounts and a tick range, return the max liquidity
+    ///         that can be deployed without exceeding either amount
+    function liquidityForAmounts(
+        uint160 sqrtPriceX96,
+        int24 tickLower,
+        int24 tickUpper,
+        uint256 amount0,
+        uint256 amount1
+    ) internal pure returns (uint128 liquidity) {
+        uint160 sqrtRatioA = TickMath.getSqrtPriceAtTick(tickLower);
+        uint160 sqrtRatioB = TickMath.getSqrtPriceAtTick(tickUpper);
+        liquidity = LiquidityAmounts.getLiquidityForAmounts(
+            sqrtPriceX96, sqrtRatioA, sqrtRatioB, amount0, amount1
+        );
+    }
+
+    /// @notice Given a liquidity amount and a tick range, return the token amounts
+    function amountsForLiquidity(
+        uint160 sqrtPriceX96,
+        int24 tickLower,
+        int24 tickUpper,
+        uint128 liquidity
+    ) internal pure returns (uint256 amount0, uint256 amount1) {
+        (amount0, amount1) = LiquidityAmounts.getAmountsForLiquidity(
+            sqrtPriceX96,
+            TickMath.getSqrtPriceAtTick(tickLower),
+            TickMath.getSqrtPriceAtTick(tickUpper),
+            liquidity
+        );
+    }
+
+    /// @notice Round a tick down to the nearest multiple of tickSpacing
+    function roundTickDown(int24 tick, int24 spacing) internal pure returns (int24) {
+        int24 rounded = (tick / spacing) * spacing;
+        if (tick &lt; 0 && tick % spacing != 0) rounded -= spacing;
+        return rounded;
+    }
+}</code></pre>
+
+  <h3 id="s4c">Inflation Attack Protection</h3>
+
+  <p>
+    The classic first-depositor attack: attacker deposits 1 wei, manually transfers huge amounts to the vault, then
+    the second real depositor either gets zero shares (rounds down) or is forced to accept wildly inflated share
+    price. PRISM prevents this by <strong>burning 1,000 initial shares to a dead address on first deposit</strong>.
+    This "minimum liquidity" pattern makes the attack economically unviable — attacker would need to deposit &gt;1000x
+    what they want to steal.
+  </p>
+
+  <div class="callout callout-spec">
+    <div class="callout-title">Test the Attack — Day 2 is not over until this fuzz passes</div>
+    <p>Foundry test harness: <code>invariant_firstDepositorCannotGriefSecondDeposit</code>. Fuzz: random first deposit (1–1e18), random donation (0–1e36), random second deposit (1e18–1e24). Assert: second depositor receives at least 99% of the shares they mathematically should. This is the canonical vault bug; it must be defended, not just "considered".</p>
+  </div>
+
+  <h3>Day 2 Deliverables Checklist</h3>
+  <ul class="checklist">
+    <li><span class="pill must">Must</span> <code>Vault.sol</code> with deposit/withdraw for single fixed position</li>
+    <li><span class="pill must">Must</span> ERC-20 shares (Solmate base), events emitted on every state change</li>
+    <li><span class="pill must">Must</span> <code>PositionLib</code> — <code>liquidityForAmounts</code>, <code>amountsForLiquidity</code>, <code>roundTickDown</code>, unit tested</li>
+    <li><span class="pill must">Must</span> First-depositor inflation protection with fuzz test that proves it</li>
+    <li><span class="pill must">Must</span> Slippage bounds (<code>amount0Min</code>, <code>amount1Min</code>) enforced on deposit AND withdraw</li>
+    <li><span class="pill must">Must</span> Deposit/withdraw unit tests: happy path, slippage revert, pause revert, TVL cap revert</li>
+    <li><span class="pill must">Must</span> <code>ReentrancyGuardTransient</code> (EIP-1153) on all user-facing functions</li>
+    <li><span class="pill should">Should</span> <code>VaultCard</code> + <code>VaultList</code> components with mocked data on frontend</li>
+    <li><span class="pill should">Should</span> Local integration test: Anvil fork → deploy Vault → call <code>deposit</code> from UI → assert state change</li>
+    <li><span class="pill could">Could</span> <code>quoteDeposit(amount0, amount1)</code> view for UI preview</li>
+  </ul>
+
+  <div class="callout callout-info">
+    <div class="callout-title">Testing Discipline</div>
+    <p>Write tests <em>alongside</em> implementation, not after. For every function: happy path + each revert reason + an invariant that property-holds. Foundry's <code>forge test -vvv</code> should be running continuously in a terminal. If coverage drops below 90% on <code>Vault.sol</code> by end of Day 2, Day 3 starts with test-writing, not strategy-writing.</p>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     SECTION 5 — DAY 3
+     ═══════════════════════════════════════════════════════════════════ -->
+<section class="section" id="s5">
+  <div class="section-label">Day 03</div>
+  <h2>Strategy System — Bell Shape</h2>
+
+  <div class="day-header d3">
+    <div class="day-number">03</div>
+    <div class="day-info">
+      <h3>Strategy System — Shaped Liquidity, Multi-Position Vault</h3>
+      <p>Finalize the <code>IStrategy</code> interface. Implement <code>BellStrategy</code> with Gaussian-approximation weights. Refactor Vault to support up to 30 simultaneous positions. Fuzz every edge case: tick boundaries, weight rounding, amount truncation. Add the prism visualization to the vault detail page.</p>
+      <p class="focus">Focus: Vault is multi-position. Bell shape is deterministic. Weights always sum to exactly 10,000. UI renders the shape.</p>
+    </div>
+  </div>
+
+  <h3 id="s5a">IStrategy — Final Form</h3>
+
+  <p>Two functions, zero mutable state. Strategies are <strong>pure-ish</strong>: they read the tick and the available amounts, and return a deterministic list of positions with normalized weights.</p>
+
+  <span class="code-label sol">packages/contracts/src/strategies/BellStrategy.sol</span>
+<pre><code>// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.25;
+
+import {IStrategy}   from "../interfaces/IStrategy.sol";
+import {PositionLib} from "../libraries/PositionLib.sol";
+import {Errors}      from "../utils/Errors.sol";
+
+/// @notice Bell-shaped liquidity distribution centered on current tick.
+///         Weights decay symmetrically toward the range edges (Gaussian approximation).
+contract BellStrategy is IStrategy {
+    uint256 public immutable spreadTicks;        // total width in ticks
+    uint256 public immutable numPositions;       // N = positions to generate (odd recommended)
+    uint256 public immutable deviationThreshold; // ticks of drift before rebalance
+    uint256 public immutable timeFallback;       // seconds since last rebalance before forced
+
+    uint256 private constant WEIGHT_DENOMINATOR = 10_000;
+
+    constructor(uint256 _spread, uint256 _n, uint256 _dev, uint256 _time) {
+        require(_n &gt; 0 &amp;&amp; _n &lt;= 30, "bad N");
+        require(_spread &gt; 0, "bad spread");
+        spreadTicks        = _spread;
+        numPositions       = _n;
+        deviationThreshold = _dev;
+        timeFallback       = _time;
+    }
+
+    function computePositions(
+        int24 currentTick,
+        int24 tickSpacing,
+        uint256 /* amount0 */,
+        uint256 /* amount1 */
+    ) external view returns (TargetPosition[] memory positions) {
+        int24 center    = PositionLib.roundTickDown(currentTick, tickSpacing);
+        int24 halfRange = int24(int256(spreadTicks / 2));
+        int24 step      = int24(int256(spreadTicks / numPositions));
+
+        positions = new TargetPosition[](numPositions);
+        uint256 totalW;
+
+        for (uint256 i; i &lt; numPositions; ) {
+            int24 lower = center - halfRange + int24(int256(i)) * step;
+            int24 upper = lower + step;
+
+            // Align to tick spacing
+            lower = PositionLib.roundTickDown(lower, tickSpacing);
+            upper = PositionLib.roundTickDown(upper, tickSpacing);
+            if (upper == lower) upper += tickSpacing;
+
+            // Gaussian-approx weight: triangular peak at center
+            int256 mid      = int256(lower + upper) / 2;
+            int256 dist     = mid &gt; int256(center) ? mid - int256(center) : int256(center) - mid;
+            uint256 absDist = uint256(dist);
+            uint256 halfU   = uint256(uint24(halfRange));
+            uint256 weight  = absDist &gt;= halfU ? 0
+                : WEIGHT_DENOMINATOR - (absDist * WEIGHT_DENOMINATOR / halfU);
+
+            positions[i] = TargetPosition({
+                tickLower: lower,
+                tickUpper: upper,
+                weight:    weight
+            });
+            totalW += weight;
+
+            unchecked { ++i; }
+        }
+
+        // Normalize so Sum(weight) = 10_000 exactly
+        if (totalW == 0) revert Errors.WeightsDoNotSum(0);
+        uint256 acc;
+        for (uint256 i; i &lt; numPositions; ) {
+            if (i == numPositions - 1) {
+                // Last position: assign remainder to guarantee exact sum
+                positions[i].weight = WEIGHT_DENOMINATOR - acc;
+            } else {
+                positions[i].weight = positions[i].weight * WEIGHT_DENOMINATOR / totalW;
+                acc += positions[i].weight;
+            }
+            unchecked { ++i; }
+        }
+    }
+
+    function shouldRebalance(
+        int24 currentTick,
+        int24 lastRebalanceTick,
+        uint256 lastRebalanceTimestamp
+    ) external view returns (bool) {
+        int256 drift     = int256(currentTick) - int256(lastRebalanceTick);
+        uint256 absDrift = drift &gt;= 0 ? uint256(drift) : uint256(-drift);
+        if (absDrift &gt; deviationThreshold) return true;
+        if (block.timestamp - lastRebalanceTimestamp &gt; timeFallback) return true;
+        return false;
+    }
+}</code></pre>
+
+  <h3 id="s5c">Multi-Position Vault &amp; Rebalance</h3>
+
+  <p>The Vault's rebalance is the centerpiece of flash accounting. All positions are removed, excess is swapped, new positions deployed — all within one <code>unlock</code>, with a single net token transfer per asset at settlement.</p>
+
+  <span class="code-label sol">Vault.sol — unlockCallback (rebalance body)</span>
+<pre><code>function unlockCallback(bytes calldata data) external override returns (bytes memory) {
+    if (msg.sender != address(poolManager)) revert Errors.OnlyPoolManager();
+    Action action = abi.decode(data, (Action));
+
+    if (action == Action.REBALANCE) {
+        (,int24 currentTick,,) = poolManager.getSlot0(_poolId());
+
+        // 1. Remove all existing positions
+        uint256 n = positions.length;
+        for (uint256 i; i &lt; n; ) {
+            Position memory p = positions[i];
+            if (p.liquidity &gt; 0) {
+                poolManager.modifyLiquidity(
+                    poolKey,
+                    IPoolManager.ModifyLiquidityParams({
+                        tickLower:      p.tickLower,
+                        tickUpper:      p.tickUpper,
+                        liquidityDelta: -int256(uint256(p.liquidity)),
+                        salt:           bytes32(0)
+                    }),
+                    ""
+                );
+            }
+            unchecked { ++i; }
+        }
+
+        // 2. Compute new target positions
+        (uint256 total0, uint256 total1) = _getTotalAssetsFromDeltas();
+        IStrategy.TargetPosition[] memory targets =
+            strategy.computePositions(currentTick, poolKey.tickSpacing, total0, total1);
+
+        // 3. Internal swap to rebalance ratio (slippage-bounded)
+        (uint256 need0, uint256 need1) = _computeRequiredAmounts(targets, currentTick);
+        if (total0 &gt; need0 + DUST) _swapExcess(true,  total0 - need0);
+        else if (total1 &gt; need1 + DUST) _swapExcess(false, total1 - need1);
+
+        // 4. Deploy new positions
+        delete positions;
+        for (uint256 i; i &lt; targets.length; ) {
+            uint128 liq = _liquidityForWeight(targets[i], total0, total1, currentTick);
+            if (liq &gt; 0) {
+                poolManager.modifyLiquidity(
+                    poolKey,
+                    IPoolManager.ModifyLiquidityParams({
+                        tickLower:      targets[i].tickLower,
+                        tickUpper:      targets[i].tickUpper,
+                        liquidityDelta: int256(uint256(liq)),
+                        salt:           bytes32(0)
+                    }),
+                    ""
+                );
+                positions.push(Position({
+                    tickLower: targets[i].tickLower,
+                    tickUpper: targets[i].tickUpper,
+                    liquidity: liq
+                }));
+            }
+            unchecked { ++i; }
+        }
+
+        // 5. Settle all deltas — PoolManager handles net transfer
+        _settleDeltas();
+
+        lastRebalanceTick      = currentTick;
+        lastRebalanceTimestamp = block.timestamp;
+        emit Rebalanced(currentTick, positions.length, 0);
+    }
+
+    return "";
+}</code></pre>
+
+  <h3>Day 3 Deliverables Checklist</h3>
+  <ul class="checklist">
+    <li><span class="pill must">Must</span> <code>BellStrategy.sol</code> implemented with normalized weights summing <em>exactly</em> to 10_000</li>
+    <li><span class="pill must">Must</span> Vault refactored for multi-position: deposit distributes liquidity across all target positions per-weight</li>
+    <li><span class="pill must">Must</span> <code>rebalance()</code> function with flash-accounted unlock callback, permissionless, gated by <code>shouldRebalance</code></li>
+    <li><span class="pill must">Must</span> Fuzz test: random ticks + random tickSpacings + random N ∈ [1,30]; weights always sum to 10_000; all ticks aligned to spacing</li>
+    <li><span class="pill must">Must</span> Invariant test: <code>positions.length &lt;= MAX_POSITIONS</code> after any sequence of ops</li>
+    <li><span class="pill should">Should</span> Prism visualization component (d3) rendering real positions from <code>vault.getPositions()</code></li>
+    <li><span class="pill should">Should</span> Slither run clean on <code>Vault.sol</code> + <code>BellStrategy.sol</code> (or documented suppressions)</li>
+    <li><span class="pill should">Should</span> Keeper bonus math in rebalance: gas reimbursement + 5 bps of TVL (capped)</li>
+    <li><span class="pill could">Could</span> <code>ExponentialStrategy.sol</code> stub scaffolded for Day 8+</li>
+  </ul>
+
+  <div class="callout callout-perf">
+    <div class="callout-title">Gas Watch</div>
+    <p>A rebalance touching 7 positions should land under <strong>650k gas</strong> on Base. If you're seeing 1M+, something is wrong — most likely you're settling deltas per-position instead of once at the end, or calling <code>getSlot0</code> in a loop. Profile with <code>forge test --gas-report</code> early and often.</p>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     SECTION 6 — DAY 4
+     ═══════════════════════════════════════════════════════════════════ -->
+<section class="section" id="s6">
+  <div class="section-label">Day 04</div>
+  <h2>ProtocolHook — Dynamic Fees &amp; MEV Observation</h2>
+
+  <div class="day-header d4">
+    <div class="day-number">04</div>
+    <div class="day-info">
+      <h3>Hook Layer — beforeSwap Dynamic Fees, afterSwap MEV</h3>
+      <p>Mine a hook address with the correct permission bits. Implement <code>beforeSwap</code> to override the swap fee based on EWMA volatility. Implement <code>afterSwap</code> with MEV observation (execution stubbed for v1.1). Wire the <code>ChainlinkAdapter</code> for external price reference. Initialize the Base Sepolia pool with the dynamic-fee flag and this hook.</p>
+      <p class="focus">Focus: Swap through the pool charges a dynamic fee. afterSwap emits SwapObserved. Pool is live on local fork.</p>
+    </div>
+  </div>
+
+  <h3 id="s6a">Hook Address Mining</h3>
+
+  <p>
+    V4 enforces hook permissions via the 14 least-significant bits of the hook address itself. For PRISM, we need
+    four callbacks enabled: <code>BEFORE_SWAP</code> (bit 7), <code>AFTER_SWAP</code> (bit 6),
+    <code>AFTER_ADD_LIQUIDITY</code> (bit 10), <code>AFTER_REMOVE_LIQUIDITY</code> (bit 8). Combined: binary
+    <code>0000_0101_1100_0000</code> = hex <code>0x05C0</code>. We search CREATE2 salts until we find an address
+    matching that bit pattern.
+  </p>
+
+  <div class="diagram-wrapper">
+    <div class="mermaid">
+graph LR
+    subgraph FLAGS["V4 PERMISSION FLAGS -- LSB 14 bits"]
+        B13["Bit 13: beforeInitialize"]
+        B12["Bit 12: afterInitialize"]
+        B11["Bit 11: beforeAddLiquidity"]
+        B10["Bit 10: afterAddLiquidity ✓"]
+        B9["Bit 9: beforeRemoveLiquidity"]
+        B8["Bit 8: afterRemoveLiquidity ✓"]
+        B7["Bit 7: beforeSwap ✓"]
+        B6["Bit 6: afterSwap ✓"]
+        B5["Bit 5: beforeDonate"]
+        B4["Bit 4: afterDonate"]
+    end
+
+    subgraph MINING["CREATE2 SALT SEARCH"]
+        direction LR
+        S["Start: nonce = 0"] --> C["computeAddress(deployer, salt, bytecode)"]
+        C --> M{"addr AND 0x3FFF<br/>equals 0x05C0?"}
+        M -->|"No"| I["salt += 1"] --> C
+        M -->|"Yes"| D["Deploy at mined address"]
+    end
+
+    FLAGS --> MINING
+
+    style FLAGS fill:#1f1a25,stroke:#b87eff,color:#ebe5d5
+    style MINING fill:#1a2025,stroke:#6dd3be,color:#ebe5d5
+    </div>
+    <div class="diagram-caption">Figure 6.1 — Hook Address Mining: salt search until bits 6, 7, 8, 10 match (0x05C0)</div>
+  </div>
+
+  <span class="code-label sol">packages/contracts/src/libraries/HookMiner.sol</span>
+<pre><code>// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.25;
+
+/// @notice Off-chain helper: deterministic CREATE2 salt search for a hook address
+///         with required permission bit flags set. Used in deploy scripts only.
+library HookMiner {
+    uint160 internal constant FLAG_MASK = 0x3FFF; // lsb 14 bits
+
+    function find(
+        address deployer,
+        uint160 requiredFlags,
+        bytes memory creationCode,
+        bytes memory constructorArgs
+    ) internal pure returns (address hookAddress, bytes32 salt) {
+        bytes memory codeWithArgs = abi.encodePacked(creationCode, constructorArgs);
+        bytes32 codeHash          = keccak256(codeWithArgs);
+
+        for (uint256 i; i &lt; 200_000; ) {
+            salt        = bytes32(i);
+            hookAddress = computeAddress(deployer, salt, codeHash);
+            if ((uint160(hookAddress) &amp; FLAG_MASK) == requiredFlags) return (hookAddress, salt);
+            unchecked { ++i; }
+        }
+        revert("HookMiner: no salt found in 200k iterations");
+    }
+
+    function computeAddress(address deployer, bytes32 salt, bytes32 codeHash)
+        internal pure returns (address)
+    {
+        return address(uint160(uint256(keccak256(
+            abi.encodePacked(bytes1(0xff), deployer, salt, codeHash)
+        ))));
+    }
+}</code></pre>
+
+  <h3 id="s6b">beforeSwap — Volatility-Adaptive Fee</h3>
+
+  <span class="code-label sol">packages/contracts/src/libraries/FeeLib.sol</span>
+<pre><code>// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.25;
+
+library FeeLib {
+    uint24  internal constant MIN_FEE       = 100;       // 0.01%
+    uint24  internal constant MAX_FEE       = 100_000;   // 10%
+    uint24  internal constant BASE_FEE      = 3_000;     // 0.30% (V3 standard)
+    uint256 internal constant PRECISION     = 1e18;
+    uint256 internal constant SHORT_ALPHA   = 5e16;      // 0.05 (~20-swap half-life)
+    uint256 internal constant LONG_ALPHA    = 5e15;      // 0.005 (~200-swap half-life)
+
+    struct VolatilityState {
+        int24   lastTick;
+        uint256 lastTimestamp;
+        uint256 ewmaShort; // short-window variance (Q64.64-ish, 18 dec)
+        uint256 ewmaLong;  // long-window variance (baseline)
+    }
+
+    /// @notice Update EWMA state on each swap
+    function update(VolatilityState storage s, int24 currentTick) internal {
+        int256 dt     = int256(currentTick) - int256(s.lastTick);
+        uint256 sqr   = uint256(dt * dt) * PRECISION;
+        s.ewmaShort   = (SHORT_ALPHA * sqr + (PRECISION - SHORT_ALPHA) * s.ewmaShort) / PRECISION;
+        s.ewmaLong    = (LONG_ALPHA  * sqr + (PRECISION - LONG_ALPHA)  * s.ewmaLong)  / PRECISION;
+        s.lastTick      = currentTick;
+        s.lastTimestamp = block.timestamp;
+    }
+
+    /// @notice Dynamic fee = BASE_FEE * (ewmaShort / ewmaLong), clamped to [MIN, MAX]
+    function calculate(VolatilityState storage s) internal view returns (uint24) {
+        if (s.ewmaLong == 0) return BASE_FEE;
+        uint256 ratio = s.ewmaShort * PRECISION / s.ewmaLong;
+        uint256 raw   = uint256(BASE_FEE) * ratio / PRECISION;
+        if (raw &lt; MIN_FEE) return MIN_FEE;
+        if (raw &gt; MAX_FEE) return MAX_FEE;
+        return uint24(raw);
+    }
+}</code></pre>
+
+  <h3 id="s6c">ProtocolHook — Full Implementation</h3>
+
+  <span class="code-label sol">packages/contracts/src/core/ProtocolHook.sol</span>
+<pre><code>// SPDX-License-Identifier: BUSL-1.1
+pragma solidity ^0.8.25;
+
+import {BaseHook}         from "v4-periphery/base/hooks/BaseHook.sol";
+import {IPoolManager}     from "v4-core/interfaces/IPoolManager.sol";
+import {PoolKey}          from "v4-core/types/PoolKey.sol";
+import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
+import {Hooks}            from "v4-core/libraries/Hooks.sol";
+import {LPFeeLibrary}     from "v4-core/libraries/LPFeeLibrary.sol";
+import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "v4-core/types/BeforeSwapDelta.sol";
+import {FeeLib}           from "../libraries/FeeLib.sol";
+import {IOracleAdapter}   from "../interfaces/IOracleAdapter.sol";
+
+contract ProtocolHook is BaseHook {
+    using PoolIdLibrary for PoolKey;
+
+    IOracleAdapter public immutable oracle;
+    mapping(PoolId => FeeLib.VolatilityState) internal volState;
+    mapping(PoolId => address) public vaultByPool;
+    mapping(address => uint256) public mevProfitsAccrued;
+
+    constructor(IPoolManager _pm, IOracleAdapter _oracle) BaseHook(_pm) {
+        oracle = _oracle;
+    }
+
+    function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
+        return Hooks.Permissions({
+            beforeInitialize:        false,
+            afterInitialize:         false,
+            beforeAddLiquidity:      false,
+            afterAddLiquidity:       true,   // bit 10
+            beforeRemoveLiquidity:   false,
+            afterRemoveLiquidity:    true,   // bit 8
+            beforeSwap:              true,   // bit 7
+            afterSwap:               true,   // bit 6
+            beforeDonate:            false,
+            afterDonate:             false,
+            beforeSwapReturnDelta:   false,
+            afterSwapReturnDelta:    false,
+            afterAddLiquidityReturnDelta: false,
+            afterRemoveLiquidityReturnDelta: false
+        });
+    }
+
+    /// @dev beforeSwap: compute and apply dynamic fee
+    function beforeSwap(
+        address, PoolKey calldata key, IPoolManager.SwapParams calldata, bytes calldata
+    ) external override returns (bytes4, BeforeSwapDelta, uint24) {
+        PoolId id = key.toId();
+        (, int24 tick,,) = poolManager.getSlot0(id);
+
+        FeeLib.VolatilityState storage s = volState[id];
+        FeeLib.update(s, tick);
+        uint24 fee = FeeLib.calculate(s);
+
+        emit FeeUpdated(PoolId.unwrap(id), fee, s.ewmaShort);
+        return (
+            this.beforeSwap.selector,
+            BeforeSwapDeltaLibrary.ZERO_DELTA,
+            fee | LPFeeLibrary.OVERRIDE_FEE_FLAG
+        );
+    }
+
+    /// @dev afterSwap: observe deviation, (v1.1) execute backrun if profitable
+    function afterSwap(
+        address, PoolKey calldata key, IPoolManager.SwapParams calldata, BalanceDelta, bytes calldata
+    ) external override returns (bytes4, int128) {
+        PoolId id = key.toId();
+        (uint160 poolSqrtPrice, int24 tick,,) = poolManager.getSlot0(id);
+
+        emit SwapObserved(PoolId.unwrap(id), tick, poolSqrtPrice);
+
+        // MVP: observation only. v1.1 adds:
+        //   uint160 extPrice = oracle.getSqrtPriceX96(...);
+        //   if (deviation &gt; MIN_THRESHOLD) { execute backrun; account profit to vault; }
+
+        return (this.afterSwap.selector, 0);
+    }
+}</code></pre>
+
+  <h3>Day 4 Deliverables Checklist</h3>
+  <ul class="checklist">
+    <li><span class="pill must">Must</span> <code>HookMiner.sol</code> producing hook address with <code>0x05C0</code> bit-pattern within 200k iterations</li>
+    <li><span class="pill must">Must</span> <code>ProtocolHook.sol</code> deployed at mined address; <code>getHookPermissions()</code> matches flags exactly</li>
+    <li><span class="pill must">Must</span> <code>beforeSwap</code> returns dynamic fee via override flag; tested via swap on fork</li>
+    <li><span class="pill must">Must</span> <code>FeeLib</code> EWMA updates correctly; property-tested that fee stays within [MIN, MAX]</li>
+    <li><span class="pill must">Must</span> Pool initialized with <code>fee = 0x800000</code> (dynamic) and this hook</li>
+    <li><span class="pill must">Must</span> <code>afterSwap</code> emits <code>SwapObserved</code>; no revert under any valid swap</li>
+    <li><span class="pill must">Must</span> <code>ChainlinkAdapter</code> implements <code>IOracleAdapter</code> with 1h staleness check</li>
+    <li><span class="pill should">Should</span> Integration test: pre-swap fee, post-swap verify observed fee matches hook output</li>
+    <li><span class="pill should">Should</span> Current fee displayed on vault detail page (reading <code>hook.currentFee(poolId)</code>)</li>
+    <li><span class="pill could">Could</span> Begin <code>MEVLib.evaluateBackrun</code> pure function (even if not wired)</li>
+  </ul>
+
+  <div class="callout callout-critical">
+    <div class="callout-title">Critical: Hook Address Must Match Bytecode</div>
+    <p>If you deploy a hook at an address whose bits say it supports <code>beforeSwap</code>, but the bytecode does not implement <code>beforeSwap</code>, <strong>the PoolManager will revert on every swap</strong>. Similarly if bytecode implements more than bits claim. Verify post-deploy: read on-chain bytecode, hash, check against expected. Treat mismatch as deployment failure — redeploy.</p>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     SECTION 7 — DAY 5
+     ═══════════════════════════════════════════════════════════════════ -->
+<section class="section" id="s7">
+  <div class="section-label">Day 05</div>
+  <h2>Testnet Deploy &amp; Frontend Integration</h2>
+
+  <div class="day-header d5">
+    <div class="day-number">05</div>
+    <div class="day-info">
+      <h3>Live on Sepolia — Full Stack Reads, Deposit End-to-End</h3>
+      <p>Run the full deploy script on Base Sepolia. Initialize the pool. Wire the frontend to read from live contracts via wagmi. Replace all mocks. Complete the <code>PrismVisual</code>, <code>DepositForm</code>, and <code>VaultDetail</code> components. First end-to-end deposit from a real wallet lands on testnet.</p>
+      <p class="focus">Focus: The whole stack lives on Base Sepolia. The UI reads it. A user can deposit and see their shares.</p>
+    </div>
+  </div>
+
+  <h3 id="s7a">Deploy Script &amp; Pool Initialization</h3>
+
+  <span class="code-label sol">packages/contracts/script/Deploy.s.sol</span>
+<pre><code>// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.25;
+
+import {Script, console}   from "forge-std/Script.sol";
+import {IPoolManager}      from "v4-core/interfaces/IPoolManager.sol";
+import {PoolKey}           from "v4-core/types/PoolKey.sol";
+import {Currency}          from "v4-core/types/Currency.sol";
+import {LPFeeLibrary}      from "v4-core/libraries/LPFeeLibrary.sol";
+import {HookMiner}         from "../src/libraries/HookMiner.sol";
+import {ProtocolHook}      from "../src/core/ProtocolHook.sol";
+import {BellStrategy}      from "../src/strategies/BellStrategy.sol";
+import {Vault}             from "../src/core/Vault.sol";
+import {ChainlinkAdapter}  from "../src/oracles/ChainlinkAdapter.sol";
+
+contract DeployScript is Script {
+    // Base Sepolia addresses
+    IPoolManager constant POOL_MANAGER =
+        IPoolManager(0x...BaseSepoliaPoolManager...);
+    address constant WETH_BASE_SEPOLIA  = 0x...WETH...;
+    address constant USDC_BASE_SEPOLIA  = 0x...USDC...;
+    address constant CHAINLINK_ETH_USD  = 0x...Feed...;
+
+    function run() external {
+        uint256 pk = vm.envUint("DEPLOYER_PK");
+        vm.startBroadcast(pk);
+
+        // 1. Oracle
+        ChainlinkAdapter oracle = new ChainlinkAdapter(CHAINLINK_ETH_USD);
+
+        // 2. Mine hook address
+        uint160 flags = uint160(
+            Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG |
+            Hooks.AFTER_ADD_LIQUIDITY_FLAG | Hooks.AFTER_REMOVE_LIQUIDITY_FLAG
+        ); // 0x05C0
+
+        bytes memory args = abi.encode(POOL_MANAGER, oracle);
+        (address hookAddr, bytes32 salt) = HookMiner.find(
+            CREATE2_DEPLOYER, flags, type(ProtocolHook).creationCode, args
+        );
+
+        // 3. Deploy hook at mined address
+        ProtocolHook hook = new ProtocolHook{ salt: salt }(POOL_MANAGER, oracle);
+        require(address(hook) == hookAddr, "hook address mismatch");
+
+        // 4. Deploy strategy
+        BellStrategy bell = new BellStrategy(
+            1000,   // spread: 1000 ticks
+            7,      // 7 positions
+            100,    // rebalance when drift > 100 ticks
+            86400   // OR 24h since last
+        );
+
+        // 5. Build PoolKey with dynamic fee flag and hook
+        (Currency c0, Currency c1) = _sort(USDC_BASE_SEPOLIA, WETH_BASE_SEPOLIA);
+        PoolKey memory key = PoolKey({
+            currency0:   c0,
+            currency1:   c1,
+            fee:         LPFeeLibrary.DYNAMIC_FEE_FLAG,  // 0x800000
+            tickSpacing: 60,
+            hooks:       hook
+        });
+
+        // 6. Initialize pool
+        uint160 startPrice = 5602277097478613991882627584; // ~ETH/USDC initial
+        POOL_MANAGER.initialize(key, startPrice);
+
+        // 7. Deploy vault against the pool
+        Vault vault = new Vault(POOL_MANAGER, key, bell, 50_000 * 1e6); // 50k USDC cap
+
+        // 8. Register vault with hook
+        hook.registerVault(address(vault));
+
+        console.log("Hook:    ", address(hook));
+        console.log("Strategy:", address(bell));
+        console.log("Vault:   ", address(vault));
+
+        vm.stopBroadcast();
+    }
+}</code></pre>
+
+  <span class="code-label bash">Deploy command</span>
+<pre><code>forge script script/Deploy.s.sol:DeployScript \
+  --rpc-url $BASE_SEPOLIA_RPC \
+  --broadcast \
+  --verify \
+  --etherscan-api-key $BASESCAN_API_KEY \
+  -vvvv</code></pre>
+
+  <h3 id="s7b">wagmi Hooks &amp; Contract Reads</h3>
+
+  <span class="code-label tsx">apps/web/src/hooks/useVault.ts</span>
+<pre><code>import { useReadContract, useReadContracts } from 'wagmi';
+import { vaultAbi, type Address } from '@/lib/contracts';
+
+export function useVault(address: Address) {
+  const { data, isLoading } = useReadContracts({
+    contracts: [
+      { address, abi: vaultAbi, functionName: 'getTotalAmounts' },
+      { address, abi: vaultAbi, functionName: 'getPositions' },
+      { address, abi: vaultAbi, functionName: 'totalSupply' },
+      { address, abi: vaultAbi, functionName: 'tvlCap' },
+    ],
+    query: { refetchInterval: 12_000 }, // ~1 block on Base
+  });
+
+  if (!data) return { isLoading, vault: undefined };
+
+  const [ totals, positions, totalSupply, tvlCap ] = data;
+  return {
+    isLoading,
+    vault: {
+      total0:      totals.result?.[0] ?? 0n,
+      total1:      totals.result?.[1] ?? 0n,
+      positions:   positions.result  ?? [],
+      totalSupply: totalSupply.result ?? 0n,
+      tvlCap:      tvlCap.result ?? 0n,
+    },
+  };
+}</code></pre>
+
+  <span class="code-label tsx">apps/web/src/hooks/useDeposit.ts</span>
+<pre><code>import { useSimulateContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { vaultAbi, erc20Abi, type Address } from '@/lib/contracts';
+
+export function useDeposit(vault: Address, amount0: bigint, amount1: bigint) {
+  const { data: sim, error: simError } = useSimulateContract({
+    address: vault,
+    abi: vaultAbi,
+    functionName: 'deposit',
+    args: [
+      amount0,
+      amount1,
+      (amount0 * 99n) / 100n, // 1% slippage tolerance
+      (amount1 * 99n) / 100n,
+      /* to */ '0x...userAddress',
+    ],
+  });
+
+  const { writeContract, data: hash, isPending } = useWriteContract();
+  const { isLoading: isMining, isSuccess } =
+    useWaitForTransactionReceipt({ hash });
+
+  const deposit = () => sim?.request &amp;&amp; writeContract(sim.request);
+
+  return { deposit, simError, isPending, isMining, isSuccess, hash };
+}</code></pre>
+
+  <h3 id="s7c">Prism Visualization Component</h3>
+
+  <span class="code-label tsx">apps/web/src/components/prism/PrismVisual.tsx</span>
+<pre><code>'use client';
+import { useMemo } from 'react';
+import * as d3 from 'd3-scale';
+import type { Position } from '@/lib/types';
+
+interface Props {
+  positions: Position[];
+  currentTick: number;
+  width?: number;
+  height?: number;
+}
+
+export function PrismVisual({ positions, currentTick, width = 640, height = 180 }: Props) {
+  const { tickDomain, bars } = useMemo(() => {
+    if (!positions.length) return { tickDomain: [0, 0], bars: [] };
+
+    const minTick = Math.min(...positions.map(p =&gt; p.tickLower));
+    const maxTick = Math.max(...positions.map(p =&gt; p.tickUpper));
+    const pad     = Math.floor((maxTick - minTick) * 0.08);
+    const domain  = [minTick - pad, maxTick + pad] as const;
+    const x       = d3.scaleLinear().domain(domain).range([0, width]);
+    const maxLiq  = Math.max(...positions.map(p =&gt; Number(p.liquidity)));
+    const y       = d3.scaleLinear().domain([0, maxLiq]).range([height - 24, 4]);
+
+    const bars = positions.map((p, i) =&gt; ({
+      x:        x(p.tickLower),
+      w:        x(p.tickUpper) - x(p.tickLower),
+      y:        y(Number(p.liquidity)),
+      h:        height - 24 - y(Number(p.liquidity)),
+      key:      i,
+      gradient: `spec-${(i % 6) + 1}`,
+    }));
+
+    return { tickDomain: domain, bars };
+  }, [positions, width, height]);
+
+  const cursorX = currentTick != null
+    ? d3.scaleLinear().domain(tickDomain).range([0, width])(currentTick)
+    : null;
+
+  return (
+    &lt;svg viewBox={`0 0 ${width} ${height}`} className="w-full"&gt;
+      &lt;defs&gt;
+        {[1,2,3,4,5,6].map(i =&gt; (
+          &lt;linearGradient key={i} id={`spec-${i}`} x1="0" x2="0" y1="0" y2="1"&gt;
+            &lt;stop offset="0%"   stopColor={`var(--spec-${i})`} stopOpacity="0.9"/&gt;
+            &lt;stop offset="100%" stopColor={`var(--spec-${i})`} stopOpacity="0.15"/&gt;
+          &lt;/linearGradient&gt;
+        ))}
+      &lt;/defs&gt;
+      {bars.map(b =&gt; (
+        &lt;rect key={b.key} x={b.x} y={b.y} width={b.w} height={b.h}
+              fill={`url(#${b.gradient})`} rx="1" /&gt;
+      ))}
+      {cursorX != null &amp;&amp; (
+        &lt;line x1={cursorX} x2={cursorX} y1={0} y2={height - 20}
+              stroke="var(--ink-bright)" strokeWidth="1" strokeDasharray="2 3" /&gt;
+      )}
+    &lt;/svg&gt;
+  );
+}</code></pre>
+
+  <h3>Day 5 Deliverables Checklist</h3>
+  <ul class="checklist">
+    <li><span class="pill must">Must</span> Full deploy script runs green on Base Sepolia; addresses logged</li>
+    <li><span class="pill must">Must</span> Pool initialized with dynamic-fee flag + hook; confirmed via <code>getSlot0</code></li>
+    <li><span class="pill must">Must</span> Contracts verified on BaseScan Sepolia</li>
+    <li><span class="pill must">Must</span> UI reads live contracts (<code>useVault</code> hook wired, no mocks on vault detail)</li>
+    <li><span class="pill must">Must</span> Deposit from UI works against Sepolia; shares appear in wallet</li>
+    <li><span class="pill must">Must</span> Withdraw from UI works; tokens returned to wallet</li>
+    <li><span class="pill must">Must</span> Rebalance can be triggered manually; positions update on UI</li>
+    <li><span class="pill should">Should</span> <code>PrismVisual</code> renders real positions and current tick cursor</li>
+    <li><span class="pill should">Should</span> Transaction states: idle / simulating / pending signature / mining / success / error</li>
+    <li><span class="pill should">Should</span> Approval flow polished (<code>useSimulateContract</code> precheck)</li>
+    <li><span class="pill should">Should</span> Mobile responsive pass on vault detail + landing</li>
+    <li><span class="pill could">Could</span> Recent rebalances feed (reading events directly, no indexer)</li>
+  </ul>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     SECTION 8 — DAY 6
+     ═══════════════════════════════════════════════════════════════════ -->
+<section class="section" id="s8">
+  <div class="section-label">Day 06</div>
+  <h2>Keeper, Hardening &amp; End-to-End Tests</h2>
+
+  <div class="day-header d6">
+    <div class="day-number">06</div>
+    <div class="day-info">
+      <h3>Automation &amp; Assurance — Keeper, Invariants, E2E</h3>
+      <p>Build the TypeScript keeper bot. Encode the seven core invariants as Foundry invariant tests. Get Slither and Aderyn clean. Write a Playwright E2E covering the full user flow. Run a personal bug-bash: act like a user, find every rough edge, fix.</p>
+      <p class="focus">Focus: Automation is on. Invariants pass. A cold take on the UX finds bugs before launch day does.</p>
+    </div>
+  </div>
+
+  <h3 id="s8a">TypeScript Keeper Bot</h3>
+
+  <p>The keeper is a single TypeScript file using viem. It polls every 30s, asks <code>strategy.shouldRebalance()</code> via <code>eth_call</code>, simulates <code>vault.rebalance()</code>, and submits if the simulation succeeds. Deploys to Fly.io as a long-running process.</p>
+
+  <span class="code-label ts">apps/keeper/src/index.ts</span>
+<pre><code>import { createPublicClient, createWalletClient, http, getContract } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
+import { baseSepolia } from 'viem/chains';
+import { vaultAbi, strategyAbi, VAULTS } from './config';
+
+const RPC = process.env.BASE_SEPOLIA_RPC!;
+const PK  = process.env.KEEPER_PK! as `0x${string}`;
+const POLL_INTERVAL = 30_000;
+
+const account = privateKeyToAccount(PK);
+const publicClient = createPublicClient({ chain: baseSepolia, transport: http(RPC) });
+const walletClient = createWalletClient({ account, chain: baseSepolia, transport: http(RPC) });
+
+async function checkAndRebalance(vaultAddr: `0x${string}`) {
+  const vault    = getContract({ address: vaultAddr, abi: vaultAbi, client: publicClient });
+  const strategy = await vault.read.strategy();
+  const strat    = getContract({ address: strategy, abi: strategyAbi, client: publicClient });
+
+  const [currentTick] = await vault.read.currentTick();
+  const lastTick      = await vault.read.lastRebalanceTick();
+  const lastTs        = await vault.read.lastRebalanceTimestamp();
+
+  const should = await strat.read.shouldRebalance([currentTick, lastTick, lastTs]);
+  if (!should) { console.log(`[${vaultAddr}] no rebalance needed`); return; }
+
+  // Simulate first
+  try {
+    const { request } = await publicClient.simulateContract({
+      account, address: vaultAddr, abi: vaultAbi, functionName: 'rebalance'
+    });
+    const hash = await walletClient.writeContract(request);
+    console.log(`[${vaultAddr}] rebalance submitted: ${hash}`);
+    const rc = await publicClient.waitForTransactionReceipt({ hash });
+    console.log(`[${vaultAddr}] rebalance confirmed in block ${rc.blockNumber}`);
+  } catch (e) {
+    console.error(`[${vaultAddr}] simulation failed, skipping:`, e);
+  }
+}
+
+async function loop() {
+  while (true) {
+    for (const vault of VAULTS) {
+      try { await checkAndRebalance(vault); }
+      catch (e) { console.error(`Vault ${vault}:`, e); }
+    }
+    await new Promise(r =&gt; setTimeout(r, POLL_INTERVAL));
+  }
+}
+
+loop().catch(e =&gt; { console.error('Fatal:', e); process.exit(1); });</code></pre>
+
+  <h3 id="s8b">Invariant Tests</h3>
+
+  <p>Foundry's <code>invariant_</code> harness runs random sequences of handler calls and checks that a property never breaks. Encode the seven core PRISM invariants; each is a line of defense against a class of bugs.</p>
+
+  <span class="code-label sol">packages/contracts/test/invariants/VaultInvariants.t.sol</span>
+<pre><code>// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.25;
+
+import {Test} from "forge-std/Test.sol";
+import {VaultHandler} from "./VaultHandler.sol";
+
+contract VaultInvariants is Test {
+    VaultHandler handler;
+
+    function setUp() public {
+        handler = new VaultHandler();
+        targetContract(address(handler));
+    }
+
+    /// Invariant 1: totalShares &gt; 0 implies positive underlying assets
+    function invariant_nonzeroSharesImplyNonzeroAssets() public view {
+        uint256 supply = handler.vault().totalSupply();
+        if (supply == 0) return;
+        (uint256 t0, uint256 t1) = handler.vault().getTotalAmounts();
+        assertTrue(t0 &gt; 0 || t1 &gt; 0, "shares outstanding but vault empty");
+    }
+
+    /// Invariant 2: positions.length never exceeds MAX_POSITIONS
+    function invariant_positionsWithinCap() public view {
+        assertLe(handler.vault().getPositions().length, 30);
+    }
+
+    /// Invariant 3: currency deltas settle to zero after every op
+    function invariant_deltaSettlesToZero() public view {
+        assertEq(handler.poolManager().currencyDelta(address(handler.vault()),
+                 handler.vault().poolKey().currency0), 0);
+        assertEq(handler.poolManager().currencyDelta(address(handler.vault()),
+                 handler.vault().poolKey().currency1), 0);
+    }
+
+    /// Invariant 4: mevProfitsAccrued only grows until claim
+    function invariant_mevMonotonic() public view {
+        assertGe(handler.hook().mevProfitsAccrued(address(handler.vault())),
+                 handler.lastObservedMEV());
+    }
+
+    /// Invariant 5: withdraw never reverts when user has shares
+    function invariant_withdrawAlwaysSucceeds() public {
+        // handler's withdrawRandomHolder() sets `lastWithdrawReverted`
+        assertFalse(handler.lastWithdrawReverted(), "withdraw reverted");
+    }
+
+    // Invariants 6 and 7: share-price monotonicity, weight sum = 10_000
+    // — encoded in their respective strategy + vault fuzz files
+}</code></pre>
+
+  <h3 id="s8c">Playwright End-to-End</h3>
+
+  <span class="code-label ts">apps/web/e2e/deposit-withdraw.spec.ts</span>
+<pre><code>import { test, expect } from '@playwright/test';
+
+test('connect, deposit, see shares, withdraw', async ({ page }) =&gt; {
+  await page.goto('/app/vault/0x...');
+
+  // Connect wallet (using test wallet extension or MockConnector)
+  await page.click('[data-testid="connect-wallet"]');
+  await page.click('[data-testid="mock-wallet"]');
+
+  // Enter deposit amounts
+  await page.fill('[data-testid="deposit-amount0"]', '0.1');
+  await page.fill('[data-testid="deposit-amount1"]', '250');
+
+  // Approve + deposit
+  await page.click('[data-testid="approve-token0"]');
+  await page.click('[data-testid="approve-token1"]');
+  await page.click('[data-testid="submit-deposit"]');
+
+  // Assert success
+  await expect(page.locator('[data-testid="tx-success"]')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('[data-testid="user-shares"]')).toContainText(/\d+/);
+
+  // Withdraw half
+  await page.click('[data-testid="tab-withdraw"]');
+  await page.click('[data-testid="withdraw-half"]');
+  await page.click('[data-testid="submit-withdraw"]');
+  await expect(page.locator('[data-testid="tx-success"]')).toBeVisible({ timeout: 30_000 });
+});</code></pre>
+
+  <h3>Day 6 Deliverables Checklist</h3>
+  <ul class="checklist">
+    <li><span class="pill must">Must</span> Keeper bot running continuously on Fly.io (or local PM2) against Sepolia</li>
+    <li><span class="pill must">Must</span> Keeper simulates before submitting; never broadcasts a reverting tx</li>
+    <li><span class="pill must">Must</span> All 7 invariants encoded and passing in CI</li>
+    <li><span class="pill must">Must</span> Slither: 0 high/critical findings (medium documented)</li>
+    <li><span class="pill must">Must</span> Aderyn: 0 high findings</li>
+    <li><span class="pill must">Must</span> Playwright E2E green on Vercel preview</li>
+    <li><span class="pill must">Must</span> Personal bug bash: 2h walking through the UI as Pam, Theo, Sara — log issues, fix them same-day</li>
+    <li><span class="pill should">Should</span> README with one-command setup instructions</li>
+    <li><span class="pill should">Should</span> Dashboard page showing user's aggregated holdings across vaults</li>
+    <li><span class="pill should">Should</span> Tenderly alerts wired on vault contract (anomalous gas, reverts, value flows)</li>
+    <li><span class="pill could">Could</span> Basic analytics: recent rebalances feed, current dynamic fee chart</li>
+  </ul>
+
+  <div class="callout callout-warn">
+    <div class="callout-title">Day 6 Is Not The Day To Add Features</div>
+    <p>Every hour spent on new functionality on Day 6 is an hour not spent on hardening. Resist scope creep ruthlessly. If it isn't on the Day-6 list, it waits until Day 8.</p>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     SECTION 9 — DAY 7
+     ═══════════════════════════════════════════════════════════════════ -->
+<section class="section" id="s9">
+  <div class="section-label">Day 07</div>
+  <h2>Public Testnet Launch</h2>
+
+  <div class="day-header d7">
+    <div class="day-number">07</div>
+    <div class="day-info">
+      <h3>Go-Live — Public URL, Demo, Observation Window Opens</h3>
+      <p>Final production deploy. Basescan verification. Demo video recorded. Public README and launch post drafted. Content freeze at noon; only fixes after. Monitoring dashboards confirmed live. Tag <code>v0.1.0-testnet</code>.</p>
+      <p class="focus">Focus: Ship what's ready. Polish what ships. Start collecting behavioral data immediately.</p>
+    </div>
+  </div>
+
+  <h3 id="s9a">Go-Live Runbook</h3>
+
+  <p>Day 7 is a sequence, not a plan. Follow it in order. Each step has a verification; do not proceed without green.</p>
+
+  <div class="diagram-wrapper">
+    <div class="mermaid">
+graph TB
+    S1["09:00 -- Content freeze<br/>only bugfixes after"] --> S2
+    S2["09:30 -- Final contract redeploy<br/>fresh addresses, logged"] --> S3
+    S3["10:00 -- Basescan verification<br/>all 4 contracts"] --> S4
+    S4["10:30 -- Seed self-deposit<br/>prove happy path"] --> S5
+    S5["11:00 -- Trigger first rebalance<br/>confirm flash accounting"] --> S6
+    S6["11:30 -- Swap through pool<br/>confirm dynamic fee applied"] --> S7
+    S7["12:00 -- Frontend production build<br/>Vercel deploy"] --> S8
+    S8["13:00 -- Keeper live monitoring<br/>Fly.io logs confirmed"] --> S9
+    S9["14:00 -- Record demo video<br/>4-6 min walkthrough"] --> S10
+    S10["15:00 -- README + launch post<br/>drafts ready"] --> S11
+    S11["16:00 -- Tenderly + Sentry<br/>alerts verified live"] --> S12
+    S12["17:00 -- Tag v0.1.0-testnet<br/>publish GitHub release"] --> S13
+    S13["18:00 -- Optional: public share<br/>Twitter / Farcaster"] --> END
+
+    END["Observation window opens<br/>-- 1 week minimum"]
+
+    style S1 fill:#1a1820,stroke:#ff5c8a,color:#ebe5d5
+    style S4 fill:#1a1820,stroke:#ff9a3d,color:#ebe5d5
+    style S5 fill:#1a1820,stroke:#f0d860,color:#ebe5d5
+    style S8 fill:#1a1820,stroke:#6dd3be,color:#ebe5d5
+    style S12 fill:#1a1820,stroke:#6d8cff,color:#ebe5d5
+    style END fill:#1a1f1a,stroke:#b87eff,stroke-width:3px,color:#ebe5d5
+    </div>
+    <div class="diagram-caption">Figure 9.1 — Day 7 Go-Live Runbook: one sequence, each step verified before the next</div>
+  </div>
+
+  <h3 id="s9b">Monitoring &amp; Demo</h3>
+
+  <table>
+    <thead>
+      <tr><th>Channel</th><th>What It Watches</th><th>Action Threshold</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Tenderly</strong></td><td>Vault contract: reverts, anomalous gas, unexpected ETH flows</td><td>Any critical revert → manual triage within 15 min</td></tr>
+      <tr><td><strong>Sentry</strong></td><td>Frontend: JS errors, failed tx submissions, chain switch failures</td><td>Error rate &gt; 2% of sessions → investigate</td></tr>
+      <tr><td><strong>Keeper logs</strong></td><td>Fly.io stdout: simulation failures, submission errors</td><td>3 consecutive failures → manual rebalance</td></tr>
+      <tr><td><strong>Basescan tx log</strong></td><td>All vault + hook txs; confirm expected pattern</td><td>Unexpected contract caller → investigate</td></tr>
+      <tr><td><strong>Vault stats (manual)</strong></td><td>TVL, share price, rebalance cadence</td><td>Share price drops &gt; 5% in 24h → investigate</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Day 7 Deliverables Checklist</h3>
+  <ul class="checklist">
+    <li><span class="pill must">Must</span> All contracts deployed fresh on Base Sepolia with deterministic addresses logged</li>
+    <li><span class="pill must">Must</span> Verified on BaseScan Sepolia (source code visible)</li>
+    <li><span class="pill must">Must</span> Self-deposit confirmed; withdraw confirmed; first rebalance confirmed</li>
+    <li><span class="pill must">Must</span> Swap through pool confirms dynamic fee override (fee &ne; base)</li>
+    <li><span class="pill must">Must</span> Production frontend live at public URL</li>
+    <li><span class="pill must">Must</span> Keeper running with monitored logs</li>
+    <li><span class="pill must">Must</span> Monitoring stack (Tenderly + Sentry) firing alerts to a channel</li>
+    <li><span class="pill must">Must</span> README with: what PRISM is, how to get test tokens, how to deposit, address registry</li>
+    <li><span class="pill must">Must</span> Git tag <code>v0.1.0-testnet</code> + GitHub release notes</li>
+    <li><span class="pill should">Should</span> Demo video (4–6 min) uploaded to YouTube or Loom</li>
+    <li><span class="pill should">Should</span> Launch post drafted (publish timing is a separate decision)</li>
+    <li><span class="pill could">Could</span> First external LP onboarded via direct outreach</li>
+  </ul>
+
+  <div class="callout callout-spec">
+    <div class="callout-title">Day-7 Definition of Done</div>
+    <p>
+      A stranger with a Base Sepolia RPC and a MetaMask wallet can (1) visit the public URL, (2) get test tokens from a faucet, (3) deposit, (4) see their position rendered on the prism visualization, (5) see the dynamic fee changing as swaps go through, (6) withdraw, all without asking for help. If any one of those steps requires human support, Day 7 is not done — spend the evening closing it.
+    </p>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     SECTION 10 — HOOK PERMISSION MATRIX
+     ═══════════════════════════════════════════════════════════════════ -->
+<section class="section" id="s10">
+  <div class="section-label">Section 10</div>
+  <h2>V4 Hook Permission Flags Matrix</h2>
+
+  <p>Each V4 hook callback is gated by a specific bit in the hook's contract address. PRISM uses 4 of the 14 defined flags. Bytecode permissions must match address permissions exactly or the PoolManager reverts.</p>
+
+  <table>
+    <thead>
+      <tr><th>Bit</th><th>Flag</th><th>Hex</th><th>PRISM Uses?</th><th>Purpose</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>13</td><td><code>BEFORE_INITIALIZE</code></td><td>0x2000</td><td>—</td><td>Guard pool creation params</td></tr>
+      <tr><td>12</td><td><code>AFTER_INITIALIZE</code></td><td>0x1000</td><td>—</td><td>Post-init hook setup</td></tr>
+      <tr><td>11</td><td><code>BEFORE_ADD_LIQUIDITY</code></td><td>0x0800</td><td>—</td><td>Pre-add checks (not needed, vault owns liquidity)</td></tr>
+      <tr><td>10</td><td><code>AFTER_ADD_LIQUIDITY</code></td><td>0x0400</td><td><strong>✓</strong></td><td>Track position additions for fee accounting</td></tr>
+      <tr><td>9</td><td><code>BEFORE_REMOVE_LIQUIDITY</code></td><td>0x0200</td><td>—</td><td>Pre-remove checks</td></tr>
+      <tr><td>8</td><td><code>AFTER_REMOVE_LIQUIDITY</code></td><td>0x0100</td><td><strong>✓</strong></td><td>Clean position state on remove</td></tr>
+      <tr><td>7</td><td><code>BEFORE_SWAP</code></td><td>0x0080</td><td><strong>✓</strong></td><td>Dynamic fee override, volatility update</td></tr>
+      <tr><td>6</td><td><code>AFTER_SWAP</code></td><td>0x0040</td><td><strong>✓</strong></td><td>MEV observation + (v1.1) backrun execution</td></tr>
+      <tr><td>5</td><td><code>BEFORE_DONATE</code></td><td>0x0020</td><td>—</td><td>Guard donation flows</td></tr>
+      <tr><td>4</td><td><code>AFTER_DONATE</code></td><td>0x0010</td><td>—</td><td>Track donations</td></tr>
+      <tr><td>3</td><td><code>BEFORE_SWAP_RETURN_DELTA</code></td><td>0x0008</td><td>—</td><td>Custom accounting in beforeSwap (v2+)</td></tr>
+      <tr><td>2</td><td><code>AFTER_SWAP_RETURN_DELTA</code></td><td>0x0004</td><td>—</td><td>Custom accounting in afterSwap (v1.1+)</td></tr>
+      <tr><td>1</td><td><code>AFTER_ADD_LIQ_RETURN_DELTA</code></td><td>0x0002</td><td>—</td><td>Liquidity-side custom accounting</td></tr>
+      <tr><td>0</td><td><code>AFTER_REMOVE_LIQ_RETURN_DELTA</code></td><td>0x0001</td><td>—</td><td>Liquidity-side custom accounting</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout callout-info">
+    <div class="callout-title">PRISM Hook Address Signature</div>
+    <p>Required address pattern: <code>address &amp; 0x3FFF == 0x05C0</code><br/>
+    Binary: <code>0000_0101_1100_0000</code> → bits 6, 7, 8, 10 set.<br/>
+    Mining time on modern hardware: typically under 30 seconds for ~200k iterations.</p>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     SECTION 11 — PERFORMANCE
+     ═══════════════════════════════════════════════════════════════════ -->
+<section class="section" id="s11">
+  <div class="section-label">Section 11</div>
+  <h2>Gas Targets &amp; Performance Benchmarks</h2>
+
+  <div class="grid-3">
+    <div class="grid-card metric-card">
+      <div class="metric-value rose">380k</div>
+      <div class="metric-label">First Deposit (gas)</div>
+    </div>
+    <div class="grid-card metric-card">
+      <div class="metric-value amber">280k</div>
+      <div class="metric-label">Subsequent Deposit</div>
+    </div>
+    <div class="grid-card metric-card">
+      <div class="metric-value yellow">260k</div>
+      <div class="metric-label">Withdraw (gas)</div>
+    </div>
+    <div class="grid-card metric-card">
+      <div class="metric-value">650k</div>
+      <div class="metric-label">Rebalance (7 positions)</div>
+    </div>
+    <div class="grid-card metric-card">
+      <div class="metric-value indigo">+25k</div>
+      <div class="metric-label">Hook Swap Overhead</div>
+    </div>
+    <div class="grid-card metric-card">
+      <div class="metric-value violet">2.5s</div>
+      <div class="metric-label">TTI on 4G Mobile</div>
+    </div>
+  </div>
+
+  <h3>Target vs. Benchmark</h3>
+
+  <table>
+    <thead>
+      <tr><th>Operation</th><th>Target</th><th>Actual (Measure Day 6)</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Deposit (first, 1-position)</td><td>&le; 380k</td><td>TBD</td><td>Includes share mint + liquidity deployment + DEAD mint</td></tr>
+      <tr><td>Deposit (subsequent, 7-position)</td><td>&le; 420k</td><td>TBD</td><td>Warm storage + 7 position modifyLiquidity calls</td></tr>
+      <tr><td>Withdraw (7-position proportional)</td><td>&le; 260k</td><td>TBD</td><td>Loop over positions, single settlement</td></tr>
+      <tr><td>Rebalance (7 → 7 positions, no swap)</td><td>&le; 550k</td><td>TBD</td><td>Flash accounting keeps token ops to 0</td></tr>
+      <tr><td>Rebalance (7 → 7 positions + internal swap)</td><td>&le; 650k</td><td>TBD</td><td>Additional swap op during unlock</td></tr>
+      <tr><td>Swap through hooked pool (baseline overhead)</td><td>&le; base + 25k</td><td>TBD</td><td>beforeSwap fee calc + afterSwap emit</td></tr>
+      <tr><td>Frontend TTI (cold cache, 4G)</td><td>&le; 2.5s</td><td>TBD</td><td>Lighthouse on production URL</td></tr>
+      <tr><td>Keeper poll → submission</td><td>&le; 60s</td><td>TBD</td><td>30s poll interval + simulation + submit</td></tr>
+    </tbody>
+  </table>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     SECTION 12 — REPO STRUCTURE
+     ═══════════════════════════════════════════════════════════════════ -->
+<section class="section" id="s12">
+  <div class="section-label">Section 12</div>
+  <h2>Repository Structure</h2>
+
+  <pre><code>prism/
+├── pnpm-workspace.yaml
+├── turbo.json
+├── package.json
+├── .github/
+│   └── workflows/
+│       ├── ci.yml                        # lint, typecheck, build, test
+│       └── contracts.yml                 # forge test, slither, aderyn
+│
+├── apps/
+│   ├── web/                              # Next.js 14 dApp + landing
+│   │   ├── src/
+│   │   │   ├── app/
+│   │   │   │   ├── (marketing)/page.tsx  # landing /
+│   │   │   │   ├── (app)/
+│   │   │   │   │   ├── vaults/page.tsx
+│   │   │   │   │   ├── vault/[id]/page.tsx
+│   │   │   │   │   └── dashboard/page.tsx
+│   │   │   │   └── providers.tsx
+│   │   │   ├── components/
+│   │   │   │   ├── ui/                   # shadcn primitives
+│   │   │   │   ├── vault/
+│   │   │   │   │   ├── VaultCard.tsx
+│   │   │   │   │   ├── VaultDetail.tsx
+│   │   │   │   │   ├── DepositForm.tsx
+│   │   │   │   │   └── WithdrawForm.tsx
+│   │   │   │   ├── prism/
+│   │   │   │   │   └── PrismVisual.tsx   # d3 position chart
+│   │   │   │   └── shared/
+│   │   │   ├── hooks/
+│   │   │   │   ├── useVault.ts
+│   │   │   │   ├── useDeposit.ts
+│   │   │   │   └── useWithdraw.ts
+│   │   │   ├── lib/
+│   │   │   │   ├── wagmi.ts
+│   │   │   │   ├── contracts.ts          # ABIs + addresses
+│   │   │   │   └── format.ts
+│   │   │   └── styles/
+│   │   ├── e2e/                          # Playwright
+│   │   └── next.config.mjs
+│   │
+│   └── keeper/                           # TS keeper bot
+│       ├── src/
+│       │   ├── index.ts
+│       │   └── config.ts
+│       ├── Dockerfile
+│       └── fly.toml
+│
+├── packages/
+│   ├── contracts/                        # Foundry project
+│   │   ├── src/
+│   │   │   ├── core/
+│   │   │   │   ├── Vault.sol
+│   │   │   │   ├── VaultFactory.sol
+│   │   │   │   └── ProtocolHook.sol
+│   │   │   ├── strategies/
+│   │   │   │   ├── BellStrategy.sol
+│   │   │   │   └── ExponentialStrategy.sol  # post-sprint
+│   │   │   ├── libraries/
+│   │   │   │   ├── PositionLib.sol
+│   │   │   │   ├── FeeLib.sol
+│   │   │   │   ├── MEVLib.sol
+│   │   │   │   └── HookMiner.sol
+│   │   │   ├── oracles/
+│   │   │   │   ├── IOracleAdapter.sol
+│   │   │   │   └── ChainlinkAdapter.sol
+│   │   │   ├── interfaces/
+│   │   │   │   ├── IVault.sol
+│   │   │   │   ├── IStrategy.sol
+│   │   │   │   └── IProtocolHook.sol
+│   │   │   └── utils/
+│   │   │       ├── Errors.sol
+│   │   │       └── ReentrancyGuardTransient.sol
+│   │   ├── test/
+│   │   │   ├── Vault.t.sol
+│   │   │   ├── BellStrategy.t.sol
+│   │   │   ├── ProtocolHook.t.sol
+│   │   │   ├── fuzz/
+│   │   │   └── invariants/
+│   │   ├── script/
+│   │   │   └── Deploy.s.sol
+│   │   └── foundry.toml
+│   │
+│   └── shared/                           # Shared types + ABIs
+│       ├── src/
+│       │   ├── abi.ts                    # Auto-generated from Foundry out/
+│       │   ├── addresses.ts              # Per-chain contract addresses
+│       │   └── types.ts
+│       └── package.json
+│
+├── scripts/
+│   ├── export-abis.ts                    # Foundry out/ → packages/shared/abi.ts
+│   └── verify-hook.ts                    # Sanity check hook bytecode vs address
+│
+├── .env.example
+├── README.md
+├── LICENSE                               # BUSL-1.1 for core; MIT for libs
+└── CONTRIBUTING.md</code></pre>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     SECTION 13 — RISK
+     ═══════════════════════════════════════════════════════════════════ -->
+<section class="section" id="s13">
+  <div class="section-label">Section 13</div>
+  <h2>Risk Management &amp; Security</h2>
+
+  <div class="diagram-wrapper">
+    <div class="mermaid">
+graph TB
+    subgraph CONTRACT["SMART CONTRACT CONTROLS"]
+        REENT["ReentrancyGuardTransient<br/>EIP-1153 on all externals"]
+        CEI["Checks-Effects-Interactions<br/>no state writes after calls"]
+        INF["Inflation Protection<br/>MIN_SHARES burned to DEAD"]
+        SAFE["SafeTransferLib<br/>handles non-reverting ERC-20s"]
+    end
+
+    subgraph FLASH_SAFE["FLASH ACCOUNTING"]
+        INV3["Invariant: all deltas<br/>settle to zero per unlock"]
+        SLIP["Slippage bounds<br/>on internal swaps"]
+        GAS_CEIL["Gas price ceiling<br/>on rebalance"]
+    end
+
+    subgraph ORACLE_SAFE["ORACLE DEFENSE"]
+        STALE["Staleness &gt; 1h<br/>disables MEV capture"]
+        TWAP["TWAP cross-check<br/>vs Chainlink (v1.1)"]
+        PAUSE_MEV["Deviation &gt; 5%<br/>pause MEV capture"]
+    end
+
+    subgraph OPERATIONAL["OPERATIONAL"]
+        IMMUT["Immutable contracts<br/>no proxy attack surface"]
+        PAUSE["Pausable deposits<br/>48h timelock"]
+        WITHDRAW["Withdrawals never<br/>pausable"]
+        TENDERLY["Tenderly alerts<br/>on anomalies"]
+    end
+
+    CEI --> INV3
+    REENT --> FLASH_SAFE
+    SLIP --> GAS_CEIL
+    STALE --> PAUSE_MEV
+    IMMUT --> PAUSE
+    PAUSE --> TENDERLY
+
+    style CONTRACT fill:#1f1520,stroke:#ff5c8a,stroke-width:2px,color:#ebe5d5
+    style FLASH_SAFE fill:#201a15,stroke:#ff9a3d,stroke-width:2px,color:#ebe5d5
+    style ORACLE_SAFE fill:#1a201f,stroke:#6dd3be,stroke-width:2px,color:#ebe5d5
+    style OPERATIONAL fill:#1a1a25,stroke:#6d8cff,stroke-width:2px,color:#ebe5d5
+    </div>
+    <div class="diagram-caption">Figure 13.1 — Risk Architecture: Contract + Flash Accounting + Oracle + Operational layers</div>
+  </div>
+
+  <div class="callout callout-critical">
+    <div class="callout-title">Seven Core Invariants</div>
+    <p><strong>1.</strong> <code>totalShares &gt; 0</code> ⟹ <code>getTotalAmounts() &gt; 0</code>. No zero-value shares outstanding.</p>
+    <p><strong>2.</strong> <code>Σ position.weight == 10_000</code> after every <code>computePositions</code> call. Exact sum, not approximate.</p>
+    <p><strong>3.</strong> <code>positions.length &lt;= MAX_POSITIONS</code> always. Bounded loops, bounded gas.</p>
+    <p><strong>4.</strong> All PoolManager currency deltas settle to zero within each <code>unlock</code> callback. No dangling debt.</p>
+    <p><strong>5.</strong> <code>mevProfitsAccrued[vault]</code> monotonically non-decreasing until explicit claim.</p>
+    <p><strong>6.</strong> <code>sharePrice(t+1) &ge; sharePrice(t)</code> under normal operation (ignoring market IL). Fees and MEV always compound in.</p>
+    <p><strong>7.</strong> Hook address bit-flags match declared <code>getHookPermissions()</code> exactly.</p>
+  </div>
+
+  <h3>Risk Mitigation Matrix</h3>
+
+  <table>
+    <thead>
+      <tr><th>Risk</th><th>Severity</th><th>Likelihood</th><th>Mitigation</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Reentrancy via hook callback</td><td>Critical</td><td>Medium</td><td>Transient-storage reentrancy guard; CEI pattern; only-PoolManager modifier</td></tr>
+      <tr><td>Flash-accounting delta mismatch</td><td>Critical</td><td>Low</td><td>Invariant 4; fuzz with random op sequences</td></tr>
+      <tr><td>First-depositor share inflation</td><td>High</td><td>Medium</td><td>MIN_SHARES = 1000 burned to DEAD on first deposit</td></tr>
+      <tr><td>Hook address ≠ bytecode permissions</td><td>Critical</td><td>Very Low</td><td>Mining + post-deploy bytecode verification</td></tr>
+      <tr><td>Oracle manipulation for MEV</td><td>Critical</td><td>Medium</td><td>Chainlink primary + TWAP cross-check (v1.1); staleness gate</td></tr>
+      <tr><td>Sandwich attack on rebalance</td><td>High</td><td>High</td><td>Slippage bounds on internal swaps; reverting rebalance is fine</td></tr>
+      <tr><td>Keeper liveness failure</td><td>Medium</td><td>Medium</td><td>Time-based fallback: anyone can rebalance after 24h idle</td></tr>
+      <tr><td>Tick-math overflow at boundaries</td><td>High</td><td>Medium</td><td>Fuzz near <code>MIN_TICK</code>/<code>MAX_TICK</code>; clamp in PositionLib</td></tr>
+      <tr><td>Gas spike during rebalance</td><td>Low</td><td>Medium</td><td>Configurable gas ceiling; rebalance aborts if exceeded</td></tr>
+      <tr><td>V4 API change mid-sprint</td><td>High</td><td>Low</td><td>Pinned commit in <code>.gitmodules</code>; no bumps until post-sprint</td></tr>
+      <tr><td>Frontend compromise / phishing</td><td>High</td><td>Low</td><td>Immutable contracts — frontend compromise limited to tx-forging, users self-verify recipient addresses</td></tr>
+    </tbody>
+  </table>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     SECTION 14 — ROADMAP & SUSTAINABILITY
+     ═══════════════════════════════════════════════════════════════════ -->
+<section class="section" id="s14">
+  <div class="section-label">Section 14</div>
+  <h2>Post-Sprint Roadmap &amp; Sustainability</h2>
+
+  <p>The 7-day sprint ends with PRISM live on Base Sepolia. The next 12 weeks turn that testnet into a mainnet protocol with audits, indexer, additional strategies, and a path to multi-chain.</p>
+
+  <h3>12-Week Horizon</h3>
+
+  <table>
+    <thead>
+      <tr><th>Window</th><th>Scope</th><th>Gate to Next</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Week 2</strong></td>
+        <td>Deploy <code>ExponentialStrategy</code>; activate MEV backrun execution in hook (not just observation); Ponder indexer running on Sepolia; dashboard v1</td>
+        <td>No critical incidents on testnet for 7 consecutive days</td>
+      </tr>
+      <tr>
+        <td><strong>Week 3</strong></td>
+        <td>Capped Base mainnet soft-launch: $50k TVL cap, whitelist 48h self-deposit, pausable deposits, immutable withdrawals</td>
+        <td>First successful rebalance on mainnet; no ERC-20 reconciliation errors</td>
+      </tr>
+      <tr>
+        <td><strong>Weeks 4-6</strong></td>
+        <td>Audit engagement (Cantina, Spearbit, or code4rena); Certora specs for invariants 1–7; OrderBookStrategy; Pyth as secondary oracle</td>
+        <td>Audit preliminary findings reviewed; critical and high findings fixed</td>
+      </tr>
+      <tr>
+        <td><strong>Weeks 7-9</strong></td>
+        <td>Audit response published; bug bounty on Immunefi; TVL cap lifted in stages ($50k → $250k → $1M); Gelato keeper migration</td>
+        <td>14-day stable run at each TVL tier before lifting cap</td>
+      </tr>
+      <tr>
+        <td><strong>Weeks 10-12</strong></td>
+        <td>Public open launch; second chain (Unichain or Arbitrum); <code>VaultFactory</code> opened to whitelisted creators; docs site live</td>
+        <td>10+ external LPs active; $1M+ TVL</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Sustainability Model</h3>
+
+  <div class="grid-2">
+    <div class="grid-card">
+      <h5>1. Performance Fee on MEV</h5>
+      <p>10% of MEV profits route to protocol treasury (once v1.1 MEV execution is live). 90% stays with LPs. Only triggers when there's captured profit — no skim from swap fees.</p>
+    </div>
+    <div class="grid-card">
+      <h5>2. Management Fee (Post-Audit)</h5>
+      <p>2% annualized on vault TVL, accrued per-block, deducted from share price. Activated only after mainnet launch + audit. Transparent and cap-able by governance.</p>
+    </div>
+    <div class="grid-card">
+      <h5>3. Protocol Grants</h5>
+      <p>Uniswap Foundation actively funds V4 hook innovation. Base/Coinbase ecosystem grants for infrastructure protocols. Realistic application targets post-testnet-proof.</p>
+    </div>
+    <div class="grid-card">
+      <h5>4. Vault Creator Share (Post-v1.2)</h5>
+      <p>When <code>VaultFactory</code> is opened to external creators, a fraction of that vault's performance fee routes to the creator. Aligns curation incentives with ecosystem growth.</p>
+    </div>
+  </div>
+
+  <div class="callout callout-info">
+    <div class="callout-title">Revenue Reality Check</div>
+    <p>PRISM is infrastructure, not a product. Sustainable revenue is Week-10+, not Week-2. The MVP sprint and first-month roadmap focus on <em>earning the right to capture value</em> — measured performance uplift for LPs, clean audit, stable operations — before introducing fees at all. A protocol that proves 50%+ LVR reduction on $10M TVL can justify a 10% MEV performance fee. A protocol that hasn't proven it cannot.</p>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     FOOTER
+     ═══════════════════════════════════════════════════════════════════ -->
+<div class="spectrum-bar thin"></div>
+<section class="section doc-footer">
+  <div class="sig">— liquidity refracted —</div>
+  <p>
+    PRISM — Product Requirements &amp; Development Plan v1.0<br>
+    BUSL-1.1 (core) + MIT (libraries)<br>
+    Built in 7 days with Claude · Last updated April 2026
+  </p>
+</section>
+
+</main>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    themeVariables: {
+      primaryColor:       '#17172a',
+      primaryTextColor:   '#ebe5d5',
+      primaryBorderColor: '#ff5c8a',
+      lineColor:          '#9690a3',
+      secondaryColor:     '#1f1520',
+      tertiaryColor:      '#1a1622',
+      fontFamily:         'Newsreader, Georgia, serif',
+      fontSize:           '13px',
+      noteBkgColor:       '#17172a',
+      noteTextColor:      '#ebe5d5',
+      noteBorderColor:    '#ff5c8a',
+    },
+    flowchart: { curve: 'basis', padding: 18 },
+    sequence: { actorMargin: 50, messageMargin: 40 },
+  });
+</script>
+
+</body>
+</html>
