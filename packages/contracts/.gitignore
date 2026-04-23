@@ -3,9 +3,5 @@ out/
 cache/
 broadcast/
 
-# Foundry lib (submodules will live here, pulled via `forge install`)
-# Keep lib/ empty in the committed tree; submodules arrive in issue #16.
-lib/
-
 # Env
 .env
