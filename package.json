@@ -1,0 +1,25 @@
+{
+  "name": "prism",
+  "version": "0.0.0",
+  "private": true,
+  "description": "PRISM — permissionless automated liquidity management on Uniswap V4",
+  "license": "BUSL-1.1",
+  "engines": {
+    "node": ">=18",
+    "pnpm": ">=9"
+  },
+  "packageManager": "pnpm@10.18.0",
+  "scripts": {
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "dev": "turbo run dev",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\""
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3",
+    "turbo": "^2.3.3"
+  }
+}
