@@ -1,0 +1,36 @@
+[profile.default]
+src = "src"
+test = "test"
+script = "script"
+out = "out"
+cache_path = "cache"
+libs = ["lib"]
+
+solc_version = "0.8.25"
+evm_version = "cancun"
+via_ir = true
+optimizer = true
+optimizer_runs = 200
+
+bytecode_hash = "none"
+cbor_metadata = false
+
+fs_permissions = [{ access = "read-write", path = "./" }]
+
+[fmt]
+line_length = 120
+tab_width = 4
+bracket_spacing = false
+int_types = "long"
+quote_style = "double"
+number_underscore = "thousands"
+multiline_func_header = "all"
+sort_imports = true
+
+[rpc_endpoints]
+base_sepolia = "${BASE_SEPOLIA_RPC_URL}"
+base = "${BASE_RPC_URL}"
+
+[etherscan]
+base_sepolia = { key = "${BASESCAN_API_KEY}", url = "https://api-sepolia.basescan.org/api", chain = 84532 }
+base = { key = "${BASESCAN_API_KEY}", url = "https://api.basescan.org/api", chain = 8453 }
