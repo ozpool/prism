@@ -143,6 +143,36 @@ Current status: **M0 · Foundations** (in progress).
 | Deploy | Vercel (web) + Fly.io (keeper) |
 | Monitoring | Tenderly + Sentry |
 
+## V4 Dependency Pins
+
+`v4-core`, `v4-periphery`, and `permit2` are pinned by commit SHA in
+`.gitmodules`. **Do not bump during the MVP** (PRD §Day 1 anti-goal).
+
+| Submodule | SHA | Date | Version |
+|---|---|---|---|
+| v4-core | `59d3ecf53afa9264a16bba0e38f4c5d2231f80bc` | 2025-05-13 | 1.0.2 (post-v4.0.0) |
+| v4-periphery | `9dafaaecc1e2e1e824eda9d941085f96517d827b` | 2026-04-02 | main HEAD at pinning |
+| permit2 | `cc56ad0f3439c502c246fc5cfcc3db92bb8b7219` | — | transitive dep of v4-periphery |
+
+Remappings (`packages/contracts/remappings.txt`):
+
+```
+v4-core/=lib/v4-core/src/
+v4-periphery/=lib/v4-periphery/src/
+permit2/=lib/permit2/src/
+```
+
+### Reason-to-bump policy
+
+Bumping v4 submodules during the MVP is an anti-goal. Bump only when ALL of:
+
+1. A security fix is released and documented by Uniswap.
+2. An API required by the PRD is missing from the pinned version.
+3. The bump is reviewed via commit diff, compiled against the full test suite,
+   and approved in a dedicated ADR commit.
+
+Pinned: 2026-04-23.
+
 ## Quick Start
 
 ```bash
