@@ -6,7 +6,7 @@ out = "out"
 cache_path = "cache"
 libs = ["lib"]
 
-solc_version = "0.8.25"
+solc_version = "0.8.26"
 evm_version = "cancun"
 via_ir = true
 optimizer = true

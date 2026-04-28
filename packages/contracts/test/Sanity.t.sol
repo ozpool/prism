@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: BUSL-1.1
-pragma solidity 0.8.25;
+pragma solidity 0.8.26;
 
-import {PoolKey} from "v4-core/types/PoolKey.sol";
+import {PoolManager} from "v4-core/PoolManager.sol";
 
 /// @notice Placeholder test so `forge test` exits 0 before Vault tests land (#38).
-/// @dev Also imports a v4-core type (`PoolKey`) to prove the submodule pins + remappings
-///      resolve end-to-end. A deeper import (e.g. `PoolManager`) requires solc 0.8.26;
-///      types/interfaces use floor pragmas and compile under our 0.8.25 pin.
+/// @dev Imports `PoolManager` from v4-core to prove the submodule pins + remappings
+///      resolve end-to-end. `PoolManager.sol` pins `pragma solidity 0.8.26` strictly,
+///      so this import would fail to compile under the previous 0.8.25 pin (see ADR-001).
 contract SanityTest {
     function test_scaffold_compiles() external pure {
         assert(true);
     }
 
-    function test_v4core_import_resolves() external pure {
-        // Reference the type so the import is not dead-code-eliminated.
-        PoolKey memory key;
-        assert(key.fee == 0);
+    function test_v4core_poolmanager_import_resolves() external pure {
+        // Reference a PoolManager-specific selector so the import isn't dead-code-eliminated.
+        bytes4 sel = PoolManager.unlock.selector;
+        assert(sel != bytes4(0));
     }
 }
