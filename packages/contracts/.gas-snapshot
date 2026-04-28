@@ -1,2 +1,2 @@
-SanityTest:test_scaffold_compiles() (gas: 130)
-SanityTest:test_v4core_import_resolves() (gas: 152)
+SanityTest:test_scaffold_compiles() (gas: 121)
+SanityTest:test_v4core_poolmanager_import_resolves() (gas: 140)
