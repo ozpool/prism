@@ -9,6 +9,16 @@ import {WagmiProvider} from "wagmi";
 
 import {wagmiConfig} from "@/lib/wagmi";
 
+// PRISM-themed RainbowKit modal — keeps wallet UI visually consistent with
+// the brand-token palette defined in app/tokens.css.
+const prismRainbowTheme = darkTheme({
+  accentColor: "#7c5cff", // --color-spectrum-violet
+  accentColorForeground: "#0c0a14", // --color-canvas (high contrast on violet)
+  borderRadius: "medium",
+  fontStack: "system",
+  overlayBlur: "small",
+});
+
 /**
  * Top-level web3 provider tree.
  *
@@ -27,7 +37,7 @@ export function Providers({children}: {children: ReactNode}) {
   return (
     <WagmiProvider config={wagmiConfig}>
       <QueryClientProvider client={queryClient}>
-        <RainbowKitProvider theme={darkTheme()} modalSize="compact">
+        <RainbowKitProvider theme={prismRainbowTheme} modalSize="compact">
           {children}
         </RainbowKitProvider>
       </QueryClientProvider>
