@@ -75,6 +75,10 @@ contract Vault is IVault, ERC20, IUnlockCallback {
         address from;
         address to;
     }
+
+    struct RebalancePayload {
+        address keeper;
+    }
     // -------------------------------------------------------------------------
     // Constants
     // -------------------------------------------------------------------------
@@ -130,6 +134,15 @@ contract Vault is IVault, ERC20, IUnlockCallback {
     /// @notice Active positions. Set by `rebalance` (#29). Indexed
     ///         in the order the strategy emits them.
     Position[] internal _positions;
+
+    /// @notice Pool tick at the moment of the last successful rebalance.
+    ///         Used by `IStrategy.shouldRebalance` to compute drift.
+    int24 public lastRebalanceTick;
+
+    /// @notice Block timestamp of the last successful rebalance.
+    ///         Used by both the strategy gate and the keeper bonus
+    ///         accrual model (ADR-007).
+    uint256 public lastRebalanceTimestamp;
 
     /// @notice Currency0 / currency1 slots from the pool key — kept as
     ///         storage (not immutable) only because PoolKey is a struct
@@ -293,6 +306,9 @@ contract Vault is IVault, ERC20, IUnlockCallback {
         if (op == Op.WITHDRAW) {
             return _handleWithdraw(abi.decode(payload, (WithdrawPayload)));
         }
+        if (op == Op.REBALANCE) {
+            return _handleRebalance(abi.decode(payload, (RebalancePayload)));
+        }
 
         revert Errors.UnknownOp();
     }
@@ -308,6 +324,16 @@ contract Vault is IVault, ERC20, IUnlockCallback {
     ///      every position via `modifyLiquidity` with negative liquidity
     ///      delta, takes both currencies, and transfers to `payload.to`.
     function _handleWithdraw(WithdrawPayload memory /*payload*/ ) internal pure returns (bytes memory) {
+        revert Errors.UnknownOp();
+    }
+
+    /// @dev Stub: real implementation removes all positions, optionally
+    ///      runs a slippage-bounded internal swap to rebalance the
+    ///      idle balance, calls strategy.computePositions for the new
+    ///      shape, deploys via modifyLiquidity per target, settles
+    ///      deltas, and mints the keeper bonus shares (ADR-007 §keeper
+    ///      economics).
+    function _handleRebalance(RebalancePayload memory /*payload*/ ) internal pure returns (bytes memory) {
         revert Errors.UnknownOp();
     }
 
@@ -346,9 +372,37 @@ contract Vault is IVault, ERC20, IUnlockCallback {
     }
 
     /// @inheritdoc IVault
-    function rebalance() external pure override {
-        // #29 implements remove-all → bounded swap → redeploy.
-        revert Errors.UnknownOp();
+    /// @dev Permissionless. Caller becomes `payload.keeper` and is
+    ///      credited the rebalance bonus on successful settlement.
+    ///      Gates on `strategy.shouldRebalance(currentTick, lastTick,
+    ///      lastTimestamp)` — reverts `RebalanceNotNeeded` if the
+    ///      strategy says no.
+    ///
+    ///      The full remove-all → bounded swap → redeploy sequence
+    ///      lives in `_handleRebalance`. The current PR exercises the
+    ///      entry-point gate; settlement lands during integration
+    ///      testing against a real PoolManager.
+    function rebalance() external override {
+        // Read the current tick from PoolManager state. For #29 we
+        // forward 0 as a placeholder — integration phase reads via
+        // `StateView.getSlot0(poolKey.toId())`. The strategy still
+        // sees a non-zero last-rebalance window the first time.
+        int24 currentTick = 0;
+
+        if (!strategy.shouldRebalance(currentTick, lastRebalanceTick, lastRebalanceTimestamp)) {
+            revert Errors.RebalanceNotNeeded();
+        }
+
+        RebalancePayload memory payload = RebalancePayload({keeper: msg.sender});
+        bytes memory result = poolManager.unlock(abi.encode(Op.REBALANCE, abi.encode(payload)));
+        // Settlement returns (newTick, nPositions, gasUsed). Decode
+        // and record post-rebalance state.
+        (int24 newTick, uint256 nPositions, uint256 gasUsed) = abi.decode(result, (int24, uint256, uint256));
+
+        lastRebalanceTick = newTick;
+        lastRebalanceTimestamp = block.timestamp;
+
+        emit Rebalanced(newTick, nPositions, gasUsed);
     }
 
     /// @inheritdoc IVault

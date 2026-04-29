@@ -241,9 +241,19 @@ contract VaultStorageTest is Test {
         vault.withdraw(0, 0, 0, address(this));
     }
 
-    function test_rebalance_stubReverts() public {
-        vm.expectRevert(Errors.UnknownOp.selector);
+    function test_rebalance_revertsWhenStrategyGateClosed() public {
+        // Default-deployed BellStrategy mock returns false for
+        // shouldRebalance under all-quiet conditions, so the entry
+        // point reverts RebalanceNotNeeded before reaching unlock.
+        // Mock the strategy.shouldRebalance call to return false.
+        vm.mockCall(STRATEGY, abi.encodeWithSelector(IStrategy.shouldRebalance.selector), abi.encode(false));
+        vm.expectRevert(Errors.RebalanceNotNeeded.selector);
         vault.rebalance();
+    }
+
+    function test_rebalance_lastTimestampInitiallyZero() public view {
+        assertEq(vault.lastRebalanceTimestamp(), 0);
+        assertEq(vault.lastRebalanceTick(), 0);
     }
 
     function test_views_stubsAreSafe() public view {
