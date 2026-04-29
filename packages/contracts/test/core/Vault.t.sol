@@ -256,15 +256,53 @@ contract VaultStorageTest is Test {
         assertEq(vault.lastRebalanceTick(), 0);
     }
 
-    function test_views_stubsAreSafe() public view {
-        // getPositions returns empty array on a fresh vault.
+    function _mockZeroBalances() internal {
+        vm.mockCall(
+            TOKEN0,
+            abi.encodeWithSelector(bytes4(keccak256("balanceOf(address)")), address(vault)),
+            abi.encode(uint256(0))
+        );
+        vm.mockCall(
+            TOKEN1,
+            abi.encodeWithSelector(bytes4(keccak256("balanceOf(address)")), address(vault)),
+            abi.encode(uint256(0))
+        );
+    }
+
+    function test_views_emptyVault() public {
+        _mockZeroBalances();
+
         Vault.Position[] memory ps = vault.getPositions();
         assertEq(ps.length, 0);
 
-        // getTotalAmounts returns 0/0 stub.
         (uint256 a, uint256 b) = vault.getTotalAmounts();
         assertEq(a, 0);
         assertEq(b, 0);
+    }
+
+    function test_sharePrice_zeroSupplyReturnsUnit() public view {
+        // sharePrice short-circuits on totalSupply == 0; no token reads.
+        (uint256 p0, uint256 p1) = vault.sharePrice();
+        assertEq(p0, 1e18);
+        assertEq(p1, 1e18);
+    }
+
+    function test_getTotalAmounts_reflectsIdleBalances() public {
+        // Mock token0/token1 balanceOf calls to return non-zero amounts.
+        vm.mockCall(
+            TOKEN0,
+            abi.encodeWithSelector(bytes4(keccak256("balanceOf(address)")), address(vault)),
+            abi.encode(uint256(1000e18))
+        );
+        vm.mockCall(
+            TOKEN1,
+            abi.encodeWithSelector(bytes4(keccak256("balanceOf(address)")), address(vault)),
+            abi.encode(uint256(2000e18))
+        );
+
+        (uint256 a, uint256 b) = vault.getTotalAmounts();
+        assertEq(a, 1000e18);
+        assertEq(b, 2000e18);
     }
 
     // -------------------------------------------------------------------------

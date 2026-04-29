@@ -411,10 +411,42 @@ contract Vault is IVault, ERC20, IUnlockCallback {
     }
 
     /// @inheritdoc IVault
-    function getTotalAmounts() external pure override returns (uint256, uint256) {
-        // #30 wires the per-position amount aggregation against PoolManager
-        // state.
-        return (0, 0);
+    /// @dev Sums every active position's token0 + token1 amounts plus
+    ///      the vault's idle balances. The per-position amounts are
+    ///      derived from V4 liquidity via PositionLib.amountsForLiquidity
+    ///      against the current sqrtPrice; integration phase wires the
+    ///      sqrtPrice read via StateView. Until then this returns the
+    ///      idle balances only — adequate for v1.0 dApp rendering of
+    ///      a freshly-deployed vault and the test surface for #38.
+    function getTotalAmounts() external view override returns (uint256 total0, uint256 total1) {
+        total0 = token0.balanceOf(address(this));
+        total1 = token1.balanceOf(address(this));
+        // Per-position aggregation lands during integration. The shape:
+        //   for (i in _positions) {
+        //     (a0, a1) = PositionLib.amountsForLiquidity(
+        //       sqrtPriceCurrentX96,
+        //       TickMath.getSqrtPriceAtTick(_positions[i].tickLower),
+        //       TickMath.getSqrtPriceAtTick(_positions[i].tickUpper),
+        //       _positions[i].liquidity
+        //     );
+        //     total0 += a0; total1 += a1;
+        //   }
+    }
+
+    /// @notice Spot share price in token0 units, scaled by 1e18.
+    /// @dev `(token0_per_share, token1_per_share)` — caller composes
+    ///      with the oracle to render a USD price. Returns (1e18, 1e18)
+    ///      pre-deposit so the dApp doesn't divide by zero.
+    function sharePrice() external view returns (uint256 price0, uint256 price1) {
+        uint256 supply = totalSupply();
+        if (supply == 0) {
+            return (1e18, 1e18);
+        }
+        (uint256 t0, uint256 t1) = (token0.balanceOf(address(this)), token1.balanceOf(address(this)));
+        // 1e18-scaled per-share amounts. Position-aware aggregation in
+        // integration phase replaces the idle-only path here.
+        price0 = (t0 * 1e18) / supply;
+        price1 = (t1 * 1e18) / supply;
     }
 
     /// @inheritdoc IVault
