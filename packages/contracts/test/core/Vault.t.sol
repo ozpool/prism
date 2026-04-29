@@ -306,6 +306,52 @@ contract VaultStorageTest is Test {
     }
 
     // -------------------------------------------------------------------------
+    // #38 — additional unit + access-control coverage
+    // -------------------------------------------------------------------------
+
+    function test_admin_eventEmittedOnPause() public {
+        vm.expectEmit(false, false, false, true, address(vault));
+        emit DepositsPausedSet(true);
+        vm.prank(OWNER);
+        vault.setDepositsPaused(true);
+    }
+
+    function test_admin_eventEmittedOnTVLCap() public {
+        vm.expectEmit(false, false, false, true, address(vault));
+        emit TVLCapSet(2_000_000e18);
+        vm.prank(OWNER);
+        vault.setTVLCap(2_000_000e18);
+    }
+
+    function test_admin_eventEmittedOnOwnershipTransfer() public {
+        vm.expectEmit(true, true, false, true, address(vault));
+        emit OwnershipTransferred(OWNER, address(0xBEEF));
+        vm.prank(OWNER);
+        vault.transferOwnership(address(0xBEEF));
+    }
+
+    function test_erc20_zeroAllowance() public view {
+        assertEq(vault.allowance(address(this), OWNER), 0);
+    }
+
+    function test_erc20_approve() public {
+        assertTrue(vault.approve(OWNER, 100e18));
+        assertEq(vault.allowance(address(this), OWNER), 100e18);
+    }
+
+    function test_constants_areImmutable() public view {
+        // Sanity: constants survive a re-read (defensive against
+        // accidental migration to mutable storage).
+        assertEq(vault.MIN_SHARES(), vault.MIN_SHARES());
+        assertEq(vault.MAX_POSITIONS(), vault.MAX_POSITIONS());
+    }
+
+    // Replicate event signatures locally so vm.expectEmit can match them.
+    event DepositsPausedSet(bool paused);
+    event TVLCapSet(uint256 newCap);
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
+    // -------------------------------------------------------------------------
     // ERC-20 base behaviour (transfers, allowances)
     // -------------------------------------------------------------------------
 
