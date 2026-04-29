@@ -212,9 +212,33 @@ contract VaultStorageTest is Test {
         vault.unlockCallback(abi.encode(uint8(0), bytes("")));
     }
 
-    function test_withdraw_stubReverts() public {
-        vm.expectRevert(Errors.UnknownOp.selector);
+    function test_withdraw_revertsOnZeroShares() public {
+        vm.expectRevert(Errors.InvalidShareAmount.selector);
+        vault.withdraw(0, 0, 0, address(this));
+    }
+
+    function test_withdraw_revertsOnInsufficientBalance() public {
+        vm.expectRevert(Errors.InvalidShareAmount.selector);
         vault.withdraw(1, 0, 0, address(this));
+    }
+
+    function test_withdraw_revertsOnZeroRecipient() public {
+        // Mint shares directly (bypassing deposit) to test the recipient
+        // check independently of the deposit flow.
+        deal(address(vault), address(this), 1e18);
+        vm.expectRevert(Errors.ZeroAddress.selector);
+        vault.withdraw(1, 0, 0, address(0));
+    }
+
+    function test_withdraw_neverPaused() public {
+        // Even with deposits paused, withdraw must remain reachable.
+        vm.prank(OWNER);
+        vault.setDepositsPaused(true);
+
+        // Withdraw still validates (zero shares → InvalidShareAmount),
+        // not DepositsPaused.
+        vm.expectRevert(Errors.InvalidShareAmount.selector);
+        vault.withdraw(0, 0, 0, address(this));
     }
 
     function test_rebalance_stubReverts() public {

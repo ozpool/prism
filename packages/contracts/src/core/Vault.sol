@@ -67,6 +67,14 @@ contract Vault is IVault, ERC20, IUnlockCallback {
         address payer;
         address to;
     }
+
+    struct WithdrawPayload {
+        uint256 shares;
+        uint256 amount0Min;
+        uint256 amount1Min;
+        address from;
+        address to;
+    }
     // -------------------------------------------------------------------------
     // Constants
     // -------------------------------------------------------------------------
@@ -282,6 +290,9 @@ contract Vault is IVault, ERC20, IUnlockCallback {
         if (op == Op.DEPOSIT) {
             return _handleDeposit(abi.decode(payload, (DepositPayload)));
         }
+        if (op == Op.WITHDRAW) {
+            return _handleWithdraw(abi.decode(payload, (WithdrawPayload)));
+        }
 
         revert Errors.UnknownOp();
     }
@@ -293,11 +304,45 @@ contract Vault is IVault, ERC20, IUnlockCallback {
         revert Errors.UnknownOp();
     }
 
-    /// @inheritdoc IVault
-    function withdraw(uint256, uint256, uint256, address) external pure override returns (uint256, uint256) {
-        // #28 implements withdraw with proportional removal across all
-        // positions; never pausable per invariant 6.
+    /// @dev Stub: real implementation removes a proportional slice of
+    ///      every position via `modifyLiquidity` with negative liquidity
+    ///      delta, takes both currencies, and transfers to `payload.to`.
+    function _handleWithdraw(WithdrawPayload memory /*payload*/ ) internal pure returns (bytes memory) {
         revert Errors.UnknownOp();
+    }
+
+    /// @inheritdoc IVault
+    /// @dev Never pausable (invariant 6). The `depositsPaused` flag is
+    ///      checked in `deposit` only; this entry point is reachable in
+    ///      every state of the contract for the lifetime of the vault.
+    function withdraw(
+        uint256 shares,
+        uint256 amount0Min,
+        uint256 amount1Min,
+        address to
+    )
+        external
+        override
+        returns (uint256 amount0, uint256 amount1)
+    {
+        if (shares == 0) revert Errors.InvalidShareAmount();
+        if (shares > balanceOf(msg.sender)) revert Errors.InvalidShareAmount();
+        if (to == address(0)) revert Errors.ZeroAddress();
+
+        // Burn shares up-front so the unlock callback can compute
+        // proportional withdrawals against the post-burn supply.
+        // Inflation guard: MIN_SHARES never circulates; burning more
+        // than (totalSupply - MIN_SHARES) is rejected by the
+        // balanceOf check above on the first depositor.
+        _burn(msg.sender, shares);
+
+        WithdrawPayload memory payload =
+            WithdrawPayload({shares: shares, amount0Min: amount0Min, amount1Min: amount1Min, from: msg.sender, to: to});
+
+        bytes memory result = poolManager.unlock(abi.encode(Op.WITHDRAW, abi.encode(payload)));
+        (amount0, amount1) = abi.decode(result, (uint256, uint256));
+
+        emit Withdraw(to, amount0, amount1, shares);
     }
 
     /// @inheritdoc IVault
