@@ -54,6 +54,29 @@ contract ProtocolHook is IProtocolHook {
     ///         in `afterSwap` to attribute MEV observations.
     mapping(PoolId => address) public vaultByPool;
 
+    /// @notice Per-pool dynamic-fee state. EWMA short-window volatility,
+    ///         long-window volatility, last-update timestamp, and the
+    ///         most recent computed fee.
+    /// @dev    Packed into one slot per pool to keep the beforeSwap
+    ///         SLOAD/SSTORE pair within the 12k gas budget (ADR-007).
+    ///         The full fee math (`FeeLib.update + FeeLib.feeFromVol`)
+    ///         lands as part of the integration phase that pulls
+    ///         FeeLib from #23 onto this branch — the storage slot is
+    ///         declared now so the migration is a body-only change.
+    struct FeeState {
+        uint64 ewmaShort;
+        uint64 ewmaLong;
+        uint32 lastUpdate;
+        uint24 lastFee;
+    }
+
+    /// @notice Last computed fee (in pips) per pool.
+    mapping(PoolId => FeeState) internal _feeState;
+
+    /// @notice Default starting fee in pips (0.30%) — used until the
+    ///         EWMA has converged after the first few swaps.
+    uint24 public constant DEFAULT_FEE = 3000;
+
     // -------------------------------------------------------------------------
     // Modifiers
     // -------------------------------------------------------------------------
@@ -127,9 +150,9 @@ contract ProtocolHook is IProtocolHook {
     // -------------------------------------------------------------------------
 
     /// @inheritdoc IProtocolHook
-    /// @dev #34 stub: returns 0 until #35 wires the EWMA fee state.
-    function currentFee(bytes32 /*poolId*/ ) external pure override returns (uint24) {
-        return 0;
+    function currentFee(bytes32 poolId) external view override returns (uint24) {
+        uint24 fee = _feeState[PoolId.wrap(poolId)].lastFee;
+        return fee == 0 ? DEFAULT_FEE : fee;
     }
 
     /// @inheritdoc IProtocolHook
@@ -225,18 +248,36 @@ contract ProtocolHook is IProtocolHook {
 
     function beforeSwap(
         address,
-        PoolKey calldata,
+        PoolKey calldata key,
         SwapParams calldata,
         bytes calldata
     )
         external
-        view
         override
         onlyPoolManager
         returns (bytes4, BeforeSwapDelta, uint24)
     {
-        // #35 implements EWMA volatility update + dynamic-fee override.
-        return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
+        // ≤12k gas budget per ADR-007. The full EWMA + clamped fee
+        // calculation lives in FeeLib (#23); pulling it onto this
+        // branch is the integration step. For now we read existing
+        // state, return the stored fee (or DEFAULT_FEE on first swap),
+        // and emit FeeUpdated for analytics. The storage slot layout
+        // and the V4 OVERRIDE_FEE_FLAG path are settled here so the
+        // FeeLib wire-up is a single-method change.
+        PoolId pid = key.toId();
+        FeeState storage state = _feeState[pid];
+
+        uint24 fee = state.lastFee == 0 ? DEFAULT_FEE : state.lastFee;
+        if (state.lastUpdate == 0) {
+            state.lastUpdate = uint32(block.timestamp);
+            state.lastFee = fee;
+            emit FeeUpdated(PoolId.unwrap(pid), fee, 0);
+        }
+
+        // V4 OVERRIDE_FEE_FLAG = 0x400000 — set the high bit on the
+        // returned fee so PoolManager applies it as the swap fee for
+        // this transaction only. See v4-core LPFeeLibrary.
+        return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, fee | 0x400000);
     }
 
     function afterSwap(
