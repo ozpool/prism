@@ -40,6 +40,7 @@ async function main() {
     client: publicClient,
     factory: config.VAULT_FACTORY_ADDRESS as Address,
     poolManager: config.POOL_MANAGER_ADDRESS as Address,
+    account: account.address,
     intervalMs: config.POLL_INTERVAL_MS,
     logger,
   });
