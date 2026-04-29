@@ -135,6 +135,12 @@ library Errors {
     // Generic
     // -------------------------------------------------------------------------
 
+    /// @notice A registry slot expected to be empty was already set.
+    ///         Used by ProtocolHook.registerOracle to enforce ADR-006
+    ///         (oracle is set once per pool; rotation requires a fresh
+    ///         vault deployment).
+    error AlreadyInitialised();
+
     /// @notice An arithmetic computation produced a value outside the
     ///         caller's accepted range. Reserved for math helpers that
     ///         do not have a more specific error already.
