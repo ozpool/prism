@@ -4,6 +4,7 @@ pragma solidity 0.8.26;
 import {IHooks} from "v4-core/interfaces/IHooks.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {Hooks} from "v4-core/libraries/Hooks.sol";
+import {StateLibrary} from "v4-core/libraries/StateLibrary.sol";
 import {BalanceDelta} from "v4-core/types/BalanceDelta.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "v4-core/types/BeforeSwapDelta.sol";
 
@@ -13,6 +14,7 @@ import {ModifyLiquidityParams, SwapParams} from "v4-core/types/PoolOperation.sol
 
 import {IProtocolHook} from "../interfaces/IProtocolHook.sol";
 import {IVault} from "../interfaces/IVault.sol";
+import {FeeLib} from "../libraries/FeeLib.sol";
 import {Errors} from "../utils/Errors.sol";
 
 /// @title ProtocolHook — singleton V4 hook
@@ -40,6 +42,7 @@ import {Errors} from "../utils/Errors.sol";
 ///         disagree with `getHookPermissions()`.
 contract ProtocolHook is IProtocolHook {
     using PoolIdLibrary for PoolKey;
+    using StateLibrary for IPoolManager;
 
     /// @notice Canonical V4 PoolManager singleton.
     IPoolManager public immutable poolManager;
@@ -54,27 +57,21 @@ contract ProtocolHook is IProtocolHook {
     ///         in `afterSwap` to attribute MEV observations.
     mapping(PoolId => address) public vaultByPool;
 
-    /// @notice Per-pool dynamic-fee state. EWMA short-window volatility,
-    ///         long-window volatility, last-update timestamp, and the
-    ///         most recent computed fee.
-    /// @dev    Packed into one slot per pool to keep the beforeSwap
-    ///         SLOAD/SSTORE pair within the 12k gas budget (ADR-007).
-    ///         The full fee math (`FeeLib.update + FeeLib.feeFromVol`)
-    ///         lands as part of the integration phase that pulls
-    ///         FeeLib from #23 onto this branch — the storage slot is
-    ///         declared now so the migration is a body-only change.
-    struct FeeState {
-        uint64 ewmaShort;
-        uint64 ewmaLong;
-        uint32 lastUpdate;
-        uint24 lastFee;
-    }
+    /// @notice Per-pool EWMA volatility state consumed by FeeLib to derive
+    ///         the dynamic fee on every swap.
+    /// @dev    Layout matches `FeeLib.VolatilityState` (int24 lastTick,
+    ///         uint256 lastTimestamp, uint256 ewmaShort, uint256 ewmaLong).
+    ///         FeeLib mutates this slot through a storage pointer; the hook
+    ///         owns the storage and never copies into memory.
+    mapping(PoolId => FeeLib.VolatilityState) internal _vol;
 
-    /// @notice Last computed fee (in pips) per pool.
-    mapping(PoolId => FeeState) internal _feeState;
+    /// @notice Last fee (in pip) computed by FeeLib.calculate, kept as a
+    ///         dedicated slot so `currentFee` is a single SLOAD without
+    ///         touching the volatility state.
+    mapping(PoolId => uint24) internal _lastFee;
 
-    /// @notice Default starting fee in pips (0.30%) — used until the
-    ///         EWMA has converged after the first few swaps.
+    /// @notice Default starting fee in pip (0.30%) — returned when no
+    ///         swap has been observed yet.
     uint24 public constant DEFAULT_FEE = 3000;
 
     // -------------------------------------------------------------------------
@@ -151,7 +148,7 @@ contract ProtocolHook is IProtocolHook {
 
     /// @inheritdoc IProtocolHook
     function currentFee(bytes32 poolId) external view override returns (uint24) {
-        uint24 fee = _feeState[PoolId.wrap(poolId)].lastFee;
+        uint24 fee = _lastFee[PoolId.wrap(poolId)];
         return fee == 0 ? DEFAULT_FEE : fee;
     }
 
@@ -257,26 +254,34 @@ contract ProtocolHook is IProtocolHook {
         onlyPoolManager
         returns (bytes4, BeforeSwapDelta, uint24)
     {
-        // ≤12k gas budget per ADR-007. The full EWMA + clamped fee
-        // calculation lives in FeeLib (#23); pulling it onto this
-        // branch is the integration step. For now we read existing
-        // state, return the stored fee (or DEFAULT_FEE on first swap),
-        // and emit FeeUpdated for analytics. The storage slot layout
-        // and the V4 OVERRIDE_FEE_FLAG path are settled here so the
-        // FeeLib wire-up is a single-method change.
+        // ADR-007 budget: ≤12k gas. Hot path is one extsload of slot0,
+        // four warm SLOADs / four warm SSTOREs on the EWMA struct, plus
+        // the clamped fee math in FeeLib.calculate.
         PoolId pid = key.toId();
-        FeeState storage state = _feeState[pid];
+        FeeLib.VolatilityState storage state = _vol[pid];
 
-        uint24 fee = state.lastFee == 0 ? DEFAULT_FEE : state.lastFee;
-        if (state.lastUpdate == 0) {
-            state.lastUpdate = uint32(block.timestamp);
-            state.lastFee = fee;
-            emit FeeUpdated(PoolId.unwrap(pid), fee, 0);
+        // Tick at the start of this swap = post-swap tick of the previous
+        // swap on this pool. FeeLib uses the delta against state.lastTick
+        // to update the EWMA before deriving the fee for THIS swap.
+        (, int24 currentTick,,) = poolManager.getSlot0(pid);
+
+        // First observation on this pool: seed lastTick + timestamp
+        // without polluting the EWMA with a zero-baseline delta. The
+        // first swap pays BASE_FEE; subsequent swaps see real volatility.
+        if (state.lastTimestamp == 0) {
+            state.lastTick = currentTick;
+            state.lastTimestamp = block.timestamp;
+        } else {
+            FeeLib.update(state, currentTick);
         }
 
-        // V4 OVERRIDE_FEE_FLAG = 0x400000 — set the high bit on the
-        // returned fee so PoolManager applies it as the swap fee for
-        // this transaction only. See v4-core LPFeeLibrary.
+        uint24 fee = FeeLib.calculate(state);
+        _lastFee[pid] = fee;
+        emit FeeUpdated(PoolId.unwrap(pid), fee, state.ewmaShort);
+
+        // V4 OVERRIDE_FEE_FLAG = 0x400000 — high bit signals PoolManager
+        // to apply the returned fee as the swap fee for this tx only.
+        // See v4-core LPFeeLibrary.OVERRIDE_FEE_FLAG.
         return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, fee | 0x400000);
     }
 
