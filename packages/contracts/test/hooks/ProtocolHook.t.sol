@@ -219,8 +219,9 @@ contract ProtocolHookTest is Test {
     // Stub views (will be replaced in #35/#36)
     // -------------------------------------------------------------------------
 
-    function test_currentFee_returnsZeroStub() public view {
-        assertEq(hook.currentFee(bytes32(uint256(1))), 0);
+    function test_currentFee_returnsDefaultBeforeSwap() public view {
+        // No swaps have been observed → fee state is empty → DEFAULT_FEE.
+        assertEq(hook.currentFee(bytes32(uint256(1))), 3000);
     }
 
     function test_mevProfits_returnsZeroStub() public view {
