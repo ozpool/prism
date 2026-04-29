@@ -77,21 +77,56 @@ contract BellStrategy is IStrategy {
         positions[6] = TargetPosition({tickLower: anchor + 3 * ts, tickUpper: anchor + 4 * ts, weight: W6});
     }
 
+    /// @notice Tick drift threshold in raw ticks. Beyond this absolute
+    ///         drift from the last rebalance tick, the bell is no longer
+    ///         centred and the gate fires.
+    /// @dev v1.0 default: 4 * (median Base ETH/USDC tickSpacing of 60) =
+    ///      240 ticks ≈ 2.4% price drift. Subject to revision in v1.1.
+    int24 public constant TICK_DRIFT_THRESHOLD = 240;
+
+    /// @notice Time threshold in seconds. Independent of tick drift —
+    ///         even a calm market gets at least one rebalance per
+    ///         `TIME_THRESHOLD` so the bell tracks medium-term drift.
+    /// @dev v1.0 default: 6 hours.
+    uint256 public constant TIME_THRESHOLD = 6 hours;
+
+    /// @notice Liveness fallback. Hard cap on time between rebalances —
+    ///         even in a near-zero-volatility market keepers must be
+    ///         able to claim their bonus, otherwise low-TVL vaults
+    ///         starve. See ADR-007 (gas budget) §keeper economics.
+    uint256 public constant LIVENESS_FALLBACK = 24 hours;
+
     /// @inheritdoc IStrategy
-    /// @dev #33 implements the actual gate (tick drift + time threshold +
-    ///      24h fallback). For #32 this returns false so the vault
-    ///      compiles against the full interface but never rebalances on
-    ///      this stub.
+    /// @dev Three independent triggers (any one fires the gate):
+    ///        1. Tick drift exceeds `TICK_DRIFT_THRESHOLD`
+    ///        2. Time since last rebalance exceeds `TIME_THRESHOLD`
+    ///        3. Liveness backstop (`LIVENESS_FALLBACK`) elapsed
+    ///      `block.timestamp` is the only non-input the strategy reads —
+    ///      explicitly permitted by ADR-005 §purity contract for the
+    ///      time gates.
     function shouldRebalance(
-        int24, /*currentTick*/
-        int24, /*lastRebalanceTick*/
-        uint256 /*lastRebalanceTimestamp*/
+        int24 currentTick,
+        int24 lastRebalanceTick,
+        uint256 lastRebalanceTimestamp
     )
         external
         view
         override
         returns (bool)
     {
+        // Liveness fallback is the hard floor — independently of how
+        // small the drift is, vaults rebalance at least once per 24h.
+        if (block.timestamp >= lastRebalanceTimestamp + LIVENESS_FALLBACK) return true;
+
+        // Time threshold — ordinary cadence trigger.
+        if (block.timestamp >= lastRebalanceTimestamp + TIME_THRESHOLD) return true;
+
+        // Tick drift — fires immediately when price moves outside the
+        // bell. Use absolute value via the int24 width.
+        int24 drift =
+            currentTick > lastRebalanceTick ? currentTick - lastRebalanceTick : lastRebalanceTick - currentTick;
+        if (drift >= TICK_DRIFT_THRESHOLD) return true;
+
         return false;
     }
 
