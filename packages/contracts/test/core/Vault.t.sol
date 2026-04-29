@@ -189,9 +189,27 @@ contract VaultStorageTest is Test {
     // Stub method reverts (replaced by #27/#28/#29)
     // -------------------------------------------------------------------------
 
-    function test_deposit_stubReverts() public {
-        vm.expectRevert(Errors.UnknownOp.selector);
+    function test_deposit_revertsWhenPaused() public {
+        vm.prank(OWNER);
+        vault.setDepositsPaused(true);
+
+        vm.expectRevert(Errors.DepositsPaused.selector);
         vault.deposit(1e18, 1e18, 0, 0, address(this));
+    }
+
+    function test_deposit_revertsOnZeroRecipient() public {
+        vm.expectRevert(Errors.ZeroAddress.selector);
+        vault.deposit(1e18, 1e18, 0, 0, address(0));
+    }
+
+    function test_deposit_revertsOnZeroAmounts() public {
+        vm.expectRevert(Errors.ZeroShares.selector);
+        vault.deposit(0, 0, 0, 0, address(this));
+    }
+
+    function test_unlockCallback_revertsForNonPoolManager() public {
+        vm.expectRevert(Errors.OnlyPoolManager.selector);
+        vault.unlockCallback(abi.encode(uint8(0), bytes("")));
     }
 
     function test_withdraw_stubReverts() public {
