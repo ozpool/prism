@@ -3,16 +3,19 @@ pragma solidity 0.8.26;
 
 import {Test} from "forge-std/Test.sol";
 
+import {IExtsload} from "v4-core/interfaces/IExtsload.sol";
 import {IHooks} from "v4-core/interfaces/IHooks.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {Hooks} from "v4-core/libraries/Hooks.sol";
 import {BalanceDelta} from "v4-core/types/BalanceDelta.sol";
 import {Currency} from "v4-core/types/Currency.sol";
 
+import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
 import {PoolKey} from "v4-core/types/PoolKey.sol";
 import {ModifyLiquidityParams, SwapParams} from "v4-core/types/PoolOperation.sol";
 
 import {ProtocolHook} from "../../src/hooks/ProtocolHook.sol";
+import {FeeLib} from "../../src/libraries/FeeLib.sol";
 import {Errors} from "../../src/utils/Errors.sol";
 
 /// Mines a CREATE2 salt that yields an address satisfying the PRISM
@@ -52,8 +55,14 @@ contract HookDeployer {
 }
 
 contract ProtocolHookTest is Test {
+    using PoolIdLibrary for PoolKey;
+
     address constant POOL_MANAGER = address(0xCafe);
     address constant FACTORY = address(0xBeef);
+
+    /// V4 OVERRIDE_FEE_FLAG — high bit signals PoolManager to apply the
+    /// returned fee as the swap fee for this transaction only.
+    uint24 constant OVERRIDE_FEE_FLAG = 0x400000;
 
     HookDeployer deployer;
     ProtocolHook hook;
@@ -61,6 +70,8 @@ contract ProtocolHookTest is Test {
     function setUp() public {
         deployer = new HookDeployer();
         hook = _deployValidHook();
+        // Give POOL_MANAGER non-zero code so extsload mocks can resolve.
+        vm.etch(POOL_MANAGER, hex"60");
     }
 
     function _deployValidHook() internal returns (ProtocolHook) {
@@ -231,6 +242,118 @@ contract ProtocolHookTest is Test {
     }
 
     // -------------------------------------------------------------------------
+    // beforeSwap — FeeLib integration
+    // -------------------------------------------------------------------------
+
+    function test_beforeSwap_firstSwapReturnsBaseFee() public {
+        PoolKey memory key = _emptyKey();
+        _mockSlot0(key, 100); // arbitrary tick — first swap seeds state
+
+        vm.prank(POOL_MANAGER);
+        (bytes4 selector,, uint24 fee) = hook.beforeSwap(address(this), key, _emptySwapParams(), "");
+
+        assertEq(selector, IHooks.beforeSwap.selector, "selector");
+        // First swap → BASE_FEE (3000) | OVERRIDE_FEE_FLAG.
+        assertEq(fee, FeeLib.BASE_FEE | OVERRIDE_FEE_FLAG, "first-swap fee");
+
+        // currentFee view returns the unflagged fee.
+        assertEq(hook.currentFee(PoolId.unwrap(key.toId())), FeeLib.BASE_FEE, "currentFee");
+    }
+
+    function test_beforeSwap_setsOverrideFlag() public {
+        PoolKey memory key = _emptyKey();
+        _mockSlot0(key, 0);
+
+        vm.prank(POOL_MANAGER);
+        (,, uint24 fee) = hook.beforeSwap(address(this), key, _emptySwapParams(), "");
+
+        // High bit must be set so PoolManager treats it as an override.
+        assertGt(fee & OVERRIDE_FEE_FLAG, 0, "override flag missing");
+    }
+
+    function test_beforeSwap_secondSwapUpdatesFeeFromVolatility() public {
+        PoolKey memory key = _emptyKey();
+
+        // First swap seeds tick at 0.
+        _mockSlot0(key, 0);
+        vm.prank(POOL_MANAGER);
+        hook.beforeSwap(address(this), key, _emptySwapParams(), "");
+
+        // Second swap arrives with tick 10_000 — large delta drives EWMA up.
+        // ewmaShort grows much faster than ewmaLong, so the ratio > 1 and
+        // the dynamic fee strictly exceeds BASE_FEE.
+        _mockSlot0(key, 10_000);
+        vm.prank(POOL_MANAGER);
+        (,, uint24 feeWithFlag) = hook.beforeSwap(address(this), key, _emptySwapParams(), "");
+
+        uint24 fee = feeWithFlag & ~OVERRIDE_FEE_FLAG;
+        assertGt(fee, FeeLib.BASE_FEE, "fee did not rise on volatility");
+        assertLe(fee, FeeLib.MAX_FEE, "fee above clamp");
+        assertEq(hook.currentFee(PoolId.unwrap(key.toId())), fee, "currentFee mismatch");
+    }
+
+    function test_beforeSwap_clampsBelowMaxFee() public {
+        PoolKey memory key = _emptyKey();
+
+        // Drive ewmaShort to a huge value via a single enormous tick jump
+        // to verify MAX_FEE clamp engages.
+        _mockSlot0(key, 0);
+        vm.prank(POOL_MANAGER);
+        hook.beforeSwap(address(this), key, _emptySwapParams(), "");
+
+        _mockSlot0(key, 800_000); // near tick range bounds
+        vm.prank(POOL_MANAGER);
+        (,, uint24 feeWithFlag) = hook.beforeSwap(address(this), key, _emptySwapParams(), "");
+
+        uint24 fee = feeWithFlag & ~OVERRIDE_FEE_FLAG;
+        assertLe(fee, FeeLib.MAX_FEE, "fee not clamped");
+    }
+
+    /// Regression test for warm-state beforeSwap gas cost. Note: ADR-007
+    /// targets 12k; today's measurement is higher because FeeLib stores
+    /// the EWMA + lastTick across four uint256 slots (~11.6k SSTORE
+    /// overhead alone). Tightening to ADR-007 requires packing
+    /// VolatilityState (e.g., uint128 ewma fields + int24 lastTick into
+    /// a single slot) — tracked as a follow-up. The bound here pins
+    /// today's number so future regressions surface.
+    function test_beforeSwap_gasBudget() public {
+        PoolKey memory key = _emptyKey();
+
+        // Seed state — first swap pays init cost; we measure the second.
+        _mockSlot0(key, 100);
+        vm.prank(POOL_MANAGER);
+        hook.beforeSwap(address(this), key, _emptySwapParams(), "");
+
+        _mockSlot0(key, 250);
+        vm.prank(POOL_MANAGER);
+        uint256 gasBefore = gasleft();
+        hook.beforeSwap(address(this), key, _emptySwapParams(), "");
+        uint256 gasUsed = gasBefore - gasleft();
+
+        // Current cost ~46k. Bound at 50k catches regressions while
+        // leaving some headroom for forge-test instrumentation noise.
+        assertLt(gasUsed, 50_000, "beforeSwap gas regression");
+    }
+
+    function test_beforeSwap_independentPerPool() public {
+        PoolKey memory keyA = _emptyKey();
+        PoolKey memory keyB = PoolKey({
+            currency0: Currency.wrap(address(0)),
+            currency1: Currency.wrap(address(2)),
+            fee: 0,
+            tickSpacing: 60,
+            hooks: IHooks(address(0))
+        });
+
+        _mockSlot0(keyA, 100);
+        vm.prank(POOL_MANAGER);
+        hook.beforeSwap(address(this), keyA, _emptySwapParams(), "");
+
+        // keyB has not been touched — its fee state is still empty.
+        assertEq(hook.currentFee(PoolId.unwrap(keyB.toId())), 3000, "keyB stale");
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 
@@ -242,5 +365,25 @@ contract ProtocolHookTest is Test {
             tickSpacing: 60,
             hooks: IHooks(address(0))
         });
+    }
+
+    function _emptySwapParams() internal pure returns (SwapParams memory p) {
+        return p;
+    }
+
+    /// Mock the StateLibrary.getSlot0 extsload path. StateLibrary derives
+    /// the pool's storage slot from `keccak256(abi.encodePacked(poolId,
+    /// POOLS_SLOT))`, then calls extsload on the manager. We mock that
+    /// extsload return so beforeSwap can read the pool's current tick
+    /// without a real PoolManager.
+    function _mockSlot0(PoolKey memory key, int24 tick) internal {
+        bytes32 stateSlot = keccak256(abi.encodePacked(PoolId.unwrap(key.toId()), bytes32(uint256(6))));
+        // Pack tick into bits 160..183, all other slot0 fields zero.
+        bytes32 slot0 = bytes32(uint256(uint24(tick)) << 160);
+        // IExtsload has multiple extsload overloads — select the
+        // single-slot variant explicitly via its 4-byte selector.
+        vm.mockCall(
+            POOL_MANAGER, abi.encodeWithSelector(bytes4(keccak256("extsload(bytes32)")), stateSlot), abi.encode(slot0)
+        );
     }
 }
