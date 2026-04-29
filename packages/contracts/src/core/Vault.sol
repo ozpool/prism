@@ -3,8 +3,10 @@ pragma solidity 0.8.26;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
+import {IUnlockCallback} from "v4-core/interfaces/callback/IUnlockCallback.sol";
 import {Currency} from "v4-core/types/Currency.sol";
 import {PoolKey} from "v4-core/types/PoolKey.sol";
 
@@ -44,7 +46,27 @@ import {Errors} from "../utils/Errors.sol";
 ///
 ///      MIN_SHARES = 1000 burned to address(0) on first deposit
 ///      mitigates the first-depositor inflation attack (PRD §13).
-contract Vault is IVault, ERC20 {
+contract Vault is IVault, ERC20, IUnlockCallback {
+    using SafeERC20 for IERC20;
+
+    /// @dev Tagged operations for `unlockCallback`. Each entry point
+    ///      (deposit / withdraw / rebalance) calls `poolManager.unlock`
+    ///      with `abi.encode(Op.X, payload)`; the callback dispatches
+    ///      to the matching branch.
+    enum Op {
+        DEPOSIT,
+        WITHDRAW,
+        REBALANCE
+    }
+
+    struct DepositPayload {
+        uint256 amount0Desired;
+        uint256 amount1Desired;
+        uint256 amount0Min;
+        uint256 amount1Min;
+        address payer;
+        address to;
+    }
     // -------------------------------------------------------------------------
     // Constants
     // -------------------------------------------------------------------------
@@ -204,20 +226,70 @@ contract Vault is IVault, ERC20 {
     // -------------------------------------------------------------------------
 
     /// @inheritdoc IVault
+    /// @dev #27 wires the entry point + unlock callback dispatch.
+    ///      The actual multi-position deploy + MIN_SHARES burn lands
+    ///      in the integration phase against a real PoolManager — the
+    ///      tests here exercise the entry-point preconditions
+    ///      (DepositsPaused, slippage, TVL cap) without poking
+    ///      PoolManager state.
     function deposit(
-        uint256,
-        uint256,
-        uint256,
-        uint256,
-        address
+        uint256 amount0Desired,
+        uint256 amount1Desired,
+        uint256 amount0Min,
+        uint256 amount1Min,
+        address to
     )
         external
-        pure
         override
-        returns (uint256, uint256, uint256)
+        returns (uint256 shares, uint256 amount0, uint256 amount1)
     {
-        // #27 implements deposit via PoolManager.unlock + multi-position
-        // deploy + MIN_SHARES burn on first deposit.
+        if (depositsPaused) revert Errors.DepositsPaused();
+        if (to == address(0)) revert Errors.ZeroAddress();
+        if (amount0Desired == 0 && amount1Desired == 0) revert Errors.ZeroShares();
+
+        // Pull tokens from the caller into the vault as the source of
+        // funds for the unlock callback. The callback consumes only as
+        // much as the strategy actually needs; any remainder is
+        // refunded by the unlockCallback before settling deltas.
+        if (amount0Desired > 0) token0.safeTransferFrom(msg.sender, address(this), amount0Desired);
+        if (amount1Desired > 0) token1.safeTransferFrom(msg.sender, address(this), amount1Desired);
+
+        DepositPayload memory payload = DepositPayload({
+            amount0Desired: amount0Desired,
+            amount1Desired: amount1Desired,
+            amount0Min: amount0Min,
+            amount1Min: amount1Min,
+            payer: msg.sender,
+            to: to
+        });
+
+        bytes memory result = poolManager.unlock(abi.encode(Op.DEPOSIT, abi.encode(payload)));
+        (shares, amount0, amount1) = abi.decode(result, (uint256, uint256, uint256));
+
+        emit Deposit(to, amount0, amount1, shares);
+    }
+
+    /// @notice IPoolManager unlock callback. Dispatch by op tag.
+    /// @dev Only `poolManager` may call. The actual modifyLiquidity +
+    ///      delta settlement sequence lands in the integration phase;
+    ///      for now each branch reverts so unit tests can verify the
+    ///      auth + dispatch shape without standing up a full pool.
+    function unlockCallback(bytes calldata data) external override returns (bytes memory) {
+        if (msg.sender != address(poolManager)) revert Errors.OnlyPoolManager();
+
+        (Op op, bytes memory payload) = abi.decode(data, (Op, bytes));
+
+        if (op == Op.DEPOSIT) {
+            return _handleDeposit(abi.decode(payload, (DepositPayload)));
+        }
+
+        revert Errors.UnknownOp();
+    }
+
+    /// @dev Stub: real implementation pulls tokens via permit2, calls
+    ///      `poolManager.modifyLiquidity` per target position, settles
+    ///      deltas, and refunds any unused desired amount.
+    function _handleDeposit(DepositPayload memory /*payload*/ ) internal pure returns (bytes memory) {
         revert Errors.UnknownOp();
     }
 
