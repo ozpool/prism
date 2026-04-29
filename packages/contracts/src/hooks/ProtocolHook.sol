@@ -4,6 +4,7 @@ pragma solidity 0.8.26;
 import {IHooks} from "v4-core/interfaces/IHooks.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {Hooks} from "v4-core/libraries/Hooks.sol";
+import {StateLibrary} from "v4-core/libraries/StateLibrary.sol";
 import {BalanceDelta} from "v4-core/types/BalanceDelta.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "v4-core/types/BeforeSwapDelta.sol";
 
@@ -11,8 +12,10 @@ import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
 import {PoolKey} from "v4-core/types/PoolKey.sol";
 import {ModifyLiquidityParams, SwapParams} from "v4-core/types/PoolOperation.sol";
 
+import {IChainlinkAdapter} from "../interfaces/IChainlinkAdapter.sol";
 import {IProtocolHook} from "../interfaces/IProtocolHook.sol";
 import {IVault} from "../interfaces/IVault.sol";
+import {MEVLib} from "../libraries/MEVLib.sol";
 import {Errors} from "../utils/Errors.sol";
 
 /// @title ProtocolHook — singleton V4 hook
@@ -40,6 +43,7 @@ import {Errors} from "../utils/Errors.sol";
 ///         disagree with `getHookPermissions()`.
 contract ProtocolHook is IProtocolHook {
     using PoolIdLibrary for PoolKey;
+    using StateLibrary for IPoolManager;
 
     /// @notice Canonical V4 PoolManager singleton.
     IPoolManager public immutable poolManager;
@@ -53,6 +57,14 @@ contract ProtocolHook is IProtocolHook {
     ///         immediately after vault deployment. The hook reads this
     ///         in `afterSwap` to attribute MEV observations.
     mapping(PoolId => address) public vaultByPool;
+
+    /// @notice Optional per-pool oracle adapter. When set, `afterSwap`
+    ///         calls `oracle.read()` and emits `SwapDeviation` with the
+    ///         pool/oracle deviation in basis points. When unset (zero
+    ///         address) the hook degrades to the safe path per ADR-003
+    ///         and skips MEV observation. Set by the factory at vault
+    ///         registration via `registerOracle`.
+    mapping(PoolId => IChainlinkAdapter) public oracleByPool;
 
     /// @notice Per-pool dynamic-fee state. EWMA short-window volatility,
     ///         long-window volatility, last-update timestamp, and the
@@ -144,6 +156,31 @@ contract ProtocolHook is IProtocolHook {
         PoolId pid = key.toId();
         vaultByPool[pid] = vault;
     }
+
+    /// @notice Set the oracle adapter for a registered pool. Optional —
+    ///         when unset, `afterSwap` skips MEV observation per ADR-003.
+    ///         Settable once: subsequent calls revert. Per ADR-006 the
+    ///         operator rotates an oracle by deploying a new vault rather
+    ///         than mutating an existing pool.
+    /// @dev    Emits `OracleRegistered` so off-chain consumers can index
+    ///         which pools are MEV-observable. Zero-address rejects.
+    function registerOracle(PoolKey calldata key, IChainlinkAdapter oracle) external onlyFactory {
+        if (address(oracle) == address(0)) revert Errors.ZeroAddress();
+        PoolId pid = key.toId();
+        if (address(oracleByPool[pid]) != address(0)) revert Errors.AlreadyInitialised();
+        oracleByPool[pid] = oracle;
+        emit OracleRegistered(PoolId.unwrap(pid), address(oracle));
+    }
+
+    /// @notice Off-chain MEV signal — pool/oracle deviation in bps.
+    /// @param  poolId        Pool the swap occurred on.
+    /// @param  deviationBps  Absolute deviation between pool and oracle
+    ///                       sqrt-price, in basis points.
+    /// @param  oracleHealthy `true` iff oracle.read() reported healthy.
+    event SwapDeviation(bytes32 indexed poolId, uint256 deviationBps, bool oracleHealthy);
+
+    /// @notice Emitted when the factory wires an oracle adapter to a pool.
+    event OracleRegistered(bytes32 indexed poolId, address oracle);
 
     // -------------------------------------------------------------------------
     // IProtocolHook — view stubs (filled by #35/#36)
@@ -292,18 +329,29 @@ contract ProtocolHook is IProtocolHook {
         onlyPoolManager
         returns (bytes4, int128)
     {
-        // v1.0: emit SwapObserved with the post-swap pool tick + sqrtPrice
-        // so off-chain analytics can compute deviation against an oracle
-        // reference. Backrun execution (v1.1) consumes the same numbers.
-        //
-        // The pool tick + sqrtPrice come from `IPoolManager.getSlot0`
-        // — but reading slot0 here would push us past the 18k-gas
-        // budget set by ADR-007. Integration phase wires this via
-        // `StateView.getSlot0(poolId)` which is cheaper. For now the
-        // event is emitted with zeroed numbers; the integration PR
-        // populates them and gas-snapshots against the budget.
+        // ADR-007 budget: ≤18k gas. Hot path is one extsload of slot0,
+        // a non-reverting external view to the oracle (skipped when no
+        // oracle is registered), and two events.
         PoolId pid = key.toId();
-        emit SwapObserved(PoolId.unwrap(pid), 0, 0);
+        bytes32 pidBytes = PoolId.unwrap(pid);
+
+        // Post-swap pool state for off-chain MEV analytics + v1.1 backruns.
+        (uint160 poolSqrtPriceX96, int24 tick,,) = poolManager.getSlot0(pid);
+        emit SwapObserved(pidBytes, tick, poolSqrtPriceX96);
+
+        // Per ADR-003 the adapter is fail-soft: it returns (0, false) on
+        // any failure path and the hook degrades. We further gate by
+        // oracle registration so deployments without a configured oracle
+        // pay zero overhead beyond the SwapObserved emit.
+        IChainlinkAdapter oracle = oracleByPool[pid];
+        if (address(oracle) != address(0)) {
+            (uint160 oracleSqrtPriceX96, bool healthy) = oracle.read();
+            uint256 deviation = 0;
+            if (healthy && oracleSqrtPriceX96 != 0) {
+                deviation = MEVLib.deviationBps(poolSqrtPriceX96, oracleSqrtPriceX96);
+            }
+            emit SwapDeviation(pidBytes, deviation, healthy);
+        }
 
         return (IHooks.afterSwap.selector, 0);
     }
