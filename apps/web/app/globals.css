@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Brand tokens land in #1 (design/1-brand-tokens). */
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+  background: #0c0a14;
+  color: #ebe5d5;
+}
