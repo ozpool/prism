@@ -1,9 +1,10 @@
-import {createPublicClient, createWalletClient, http} from "viem";
+import {createPublicClient, createWalletClient, http, type Address} from "viem";
 import {privateKeyToAccount} from "viem/accounts";
 import {baseSepolia} from "viem/chains";
 import pino from "pino";
 
 import {loadConfig} from "./config.js";
+import {runPollLoop} from "./poll.js";
 
 async function main() {
   const config = loadConfig();
@@ -27,24 +28,32 @@ async function main() {
     {
       keeper: account.address,
       factory: config.VAULT_FACTORY_ADDRESS,
+      poolManager: config.POOL_MANAGER_ADDRESS,
       pollIntervalMs: config.POLL_INTERVAL_MS,
       maxGasPriceGwei: config.MAX_GAS_PRICE_GWEI,
       blockNumber: blockNumber.toString(),
     },
-    "PRISM keeper online — poll loop lands in #56",
+    "PRISM keeper online",
   );
 
-  // #56 wires the actual poll loop: enumerate vaults, evaluate
-  // shouldRebalance per vault, simulate via eth_call (#57), submit
-  // (#58), retry on reprice. Health endpoint + SIGTERM in #60.
-  await new Promise<void>(() => {
-    // park forever; #60 replaces with proper lifecycle.
-    setInterval(() => {
-      logger.debug("keeper alive");
-    }, config.POLL_INTERVAL_MS);
+  const stop = runPollLoop({
+    client: publicClient,
+    factory: config.VAULT_FACTORY_ADDRESS as Address,
+    poolManager: config.POOL_MANAGER_ADDRESS as Address,
+    intervalMs: config.POLL_INTERVAL_MS,
+    logger,
   });
 
-  // Mark walletClient as used so TS doesn't drop it from the bundle.
+  // #58 will replace this park-forever with proper tx submission +
+  // confirmation tracking. #60 adds /health + graceful SIGTERM.
+  await new Promise<void>((resolve) => {
+    process.on("SIGTERM", () => {
+      logger.info("SIGTERM received — draining in-flight cycle");
+      stop().then(resolve);
+    });
+  });
+
+  // Suppress unused-var lint for walletClient — #58 wires it for tx submit.
   void walletClient;
 }
 
