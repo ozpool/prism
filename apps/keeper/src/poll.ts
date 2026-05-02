@@ -3,6 +3,7 @@ import type {Logger} from "pino";
 
 import {strategyAbi, vaultAbi, vaultFactoryAbi} from "./abi.js";
 import {readSlot0, toPoolId} from "./pool.js";
+import {Metrics} from "./metrics.js";
 import {gatedSimulate, type SimulateClient, type SimulateResult} from "./simulate.js";
 import {submitRebalance, type SubmitClient, type SubmitResult} from "./submit.js";
 
@@ -43,6 +44,10 @@ export interface PollDeps {
   /// Maximum reprice retries.
   maxSubmitAttempts: number;
   logger: Logger;
+  /// Optional shared metrics sink. The lifecycle layer (#60) creates
+  /// this at startup and exposes a snapshot via /metrics. When omitted
+  /// the loop runs metric-free — keeps unit tests trivial.
+  metrics?: Metrics;
 }
 
 /// One pass of the keeper poll loop.
@@ -177,7 +182,7 @@ function errMsg(err: unknown): string {
 /// Run the poll loop forever with the configured cadence. Returns a
 /// stop function that resolves after the in-flight cycle completes.
 export function runPollLoop(deps: PollDeps & {intervalMs: number}): () => Promise<void> {
-  const {logger, intervalMs} = deps;
+  const {logger, intervalMs, metrics} = deps;
   let stopped = false;
   let inflight: Promise<void> = Promise.resolve();
 
@@ -191,18 +196,37 @@ export function runPollLoop(deps: PollDeps & {intervalMs: number}): () => Promis
       const dueCount = evaluations.filter((e) => e.shouldRebalance).length;
       const submittableCount = evaluations.filter((e) => e.simulation?.ok === true).length;
       const confirmedCount = evaluations.filter((e) => e.submission?.status === "confirmed").length;
+      const failedCount = evaluations.filter((e) => e.submission?.status === "failed").length;
+
+      if (metrics) {
+        for (const e of evaluations) {
+          if (e.simulation?.ok) metrics.rebalanceSimulated();
+          if (e.submission?.status === "confirmed") {
+            metrics.rebalanceSubmitted();
+            metrics.rebalanceConfirmed();
+          } else if (e.submission?.status === "failed") {
+            metrics.rebalanceSubmitted();
+            metrics.rebalanceFailed();
+          }
+        }
+        metrics.cycleCompleted(Date.now() - start);
+      }
+
       cycleLogger.info(
         {
           vaultCount: evaluations.length,
           dueCount,
           submittableCount,
           confirmedCount,
+          failedCount,
           ms: Date.now() - start,
         },
         "poll cycle complete",
       );
     } catch (err) {
-      cycleLogger.error({err: errMsg(err), ms: Date.now() - start}, "poll cycle failed");
+      const ms = Date.now() - start;
+      if (metrics) metrics.cycleFailed(ms);
+      cycleLogger.error({err: errMsg(err), ms}, "poll cycle failed");
     }
   };
 
