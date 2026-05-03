@@ -3,15 +3,110 @@ pragma solidity 0.8.26;
 
 import {Test} from "forge-std/Test.sol";
 
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+
 import {IHooks} from "v4-core/interfaces/IHooks.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
+import {IUnlockCallback} from "v4-core/interfaces/callback/IUnlockCallback.sol";
+import {BalanceDelta, toBalanceDelta} from "v4-core/types/BalanceDelta.sol";
 import {Currency} from "v4-core/types/Currency.sol";
+import {PoolId} from "v4-core/types/PoolId.sol";
 import {PoolKey} from "v4-core/types/PoolKey.sol";
+import {ModifyLiquidityParams} from "v4-core/types/PoolOperation.sol";
 
 import {Vault} from "../../src/core/Vault.sol";
 import {IProtocolHook} from "../../src/interfaces/IProtocolHook.sol";
 import {IStrategy} from "../../src/interfaces/IStrategy.sol";
 import {Errors} from "../../src/utils/Errors.sol";
+
+/// Minimal ERC20 used by the rebalance-body integration tests.
+contract MockERC20 is ERC20 {
+    constructor(string memory n, string memory s) ERC20(n, s) {}
+
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
+    }
+}
+
+/// Stub strategy: returns one position with weight 10_000 and a
+/// configurable shouldRebalance verdict.
+contract MockStrategy is IStrategy {
+    int24 public lowerTick;
+    int24 public upperTick;
+    bool public rebalanceVerdict = true;
+
+    function set(int24 l, int24 u, bool gate) external {
+        lowerTick = l;
+        upperTick = u;
+        rebalanceVerdict = gate;
+    }
+
+    function computePositions(
+        int24,
+        int24,
+        uint256,
+        uint256
+    )
+        external
+        view
+        override
+        returns (TargetPosition[] memory)
+    {
+        TargetPosition[] memory ps = new TargetPosition[](1);
+        ps[0] = TargetPosition({tickLower: lowerTick, tickUpper: upperTick, weight: 10_000});
+        return ps;
+    }
+
+    function shouldRebalance(int24, int24, uint256) external view override returns (bool) {
+        return rebalanceVerdict;
+    }
+}
+
+/// Minimal PoolManager stand-in. modifyLiquidity returns a configurable
+/// per-call delta — the test sets it before each modifyLiquidity to
+/// drive remove vs deploy paths through the same mock.
+contract MockPoolManager {
+    BalanceDelta public mockedDelta;
+    bytes32 public mockedSlot0;
+
+    function setDelta(int128 d0, int128 d1) external {
+        mockedDelta = toBalanceDelta(d0, d1);
+    }
+
+    function setSlot0(uint160 sqrtPriceX96, int24 tick) external {
+        mockedSlot0 = bytes32(uint256(sqrtPriceX96)) | bytes32(uint256(uint24(tick)) << 160);
+    }
+
+    function unlock(bytes calldata data) external returns (bytes memory) {
+        return IUnlockCallback(msg.sender).unlockCallback(data);
+    }
+
+    function modifyLiquidity(
+        PoolKey memory,
+        ModifyLiquidityParams memory,
+        bytes calldata
+    )
+        external
+        view
+        returns (BalanceDelta, BalanceDelta)
+    {
+        return (mockedDelta, BalanceDelta.wrap(0));
+    }
+
+    function take(Currency currency, address to, uint256 amount) external {
+        ERC20(Currency.unwrap(currency)).transfer(to, amount);
+    }
+
+    function settle() external payable returns (uint256) {
+        return 0;
+    }
+
+    function sync(Currency) external {}
+
+    function extsload(bytes32) external view returns (bytes32) {
+        return mockedSlot0;
+    }
+}
 
 contract VaultStorageTest is Test {
     address constant POOL_MANAGER = address(0xCa11);
@@ -242,11 +337,15 @@ contract VaultStorageTest is Test {
     }
 
     function test_rebalance_revertsWhenStrategyGateClosed() public {
-        // Default-deployed BellStrategy mock returns false for
-        // shouldRebalance under all-quiet conditions, so the entry
-        // point reverts RebalanceNotNeeded before reaching unlock.
-        // Mock the strategy.shouldRebalance call to return false.
+        // Mock the StateLibrary.getSlot0 extsload + the strategy gate.
+        // The pool manager is a stub address with no code, so extsload
+        // would otherwise revert before reaching the strategy check.
+        vm.etch(POOL_MANAGER, hex"60");
+        vm.mockCall(
+            POOL_MANAGER, abi.encodeWithSelector(bytes4(keccak256("extsload(bytes32)"))), abi.encode(bytes32(0))
+        );
         vm.mockCall(STRATEGY, abi.encodeWithSelector(IStrategy.shouldRebalance.selector), abi.encode(false));
+
         vm.expectRevert(Errors.RebalanceNotNeeded.selector);
         vault.rebalance();
     }
@@ -256,12 +355,15 @@ contract VaultStorageTest is Test {
         assertEq(vault.lastRebalanceTick(), 0);
     }
 
-    function test_views_stubsAreSafe() public view {
+    function test_views_emptyVaultReturnsZeros() public {
         // getPositions returns empty array on a fresh vault.
         Vault.Position[] memory ps = vault.getPositions();
         assertEq(ps.length, 0);
 
-        // getTotalAmounts returns 0/0 stub.
+        // Mock token balances — stub addresses have no code.
+        vm.mockCall(TOKEN0, abi.encodeWithSignature("balanceOf(address)", address(vault)), abi.encode(uint256(0)));
+        vm.mockCall(TOKEN1, abi.encodeWithSignature("balanceOf(address)", address(vault)), abi.encode(uint256(0)));
+
         (uint256 a, uint256 b) = vault.getTotalAmounts();
         assertEq(a, 0);
         assertEq(b, 0);
@@ -279,5 +381,138 @@ contract VaultStorageTest is Test {
     function test_erc20_transfer_zeroBalance() public {
         vm.expectRevert();
         vault.transfer(address(0x9999), 1);
+    }
+}
+
+// =============================================================================
+// VaultRebalanceTest — exercises _handleRebalance + currentTick wire-up +
+// getTotalAmounts against the mock pool. Real V4 settle/take is exercised
+// in the fork suite (#42); the mock is enough to drive the dispatch shape
+// and the keeper-bonus math.
+// =============================================================================
+
+contract VaultRebalanceTest is Test {
+    address constant HOOK = address(0xB00C);
+    address constant OWNER = address(0xACE);
+
+    /// Sqrt-price for tick 0 — gives equal-weight token0/token1 deploys.
+    uint160 constant SQRT_PRICE_TICK_0 = 79_228_162_514_264_337_593_543_950_336;
+
+    uint256 constant TVL_CAP = 1_000_000e18;
+
+    Vault vault;
+    MockERC20 token0;
+    MockERC20 token1;
+    MockStrategy strategy;
+    MockPoolManager pool;
+    PoolKey key;
+
+    function setUp() public {
+        token0 = new MockERC20("Token0", "TK0");
+        token1 = new MockERC20("Token1", "TK1");
+        if (uint160(address(token1)) < uint160(address(token0))) {
+            (token0, token1) = (token1, token0);
+        }
+
+        strategy = new MockStrategy();
+        strategy.set(-600, 600, true);
+        pool = new MockPoolManager();
+        pool.setSlot0(SQRT_PRICE_TICK_0, 0);
+
+        key = PoolKey({
+            currency0: Currency.wrap(address(token0)),
+            currency1: Currency.wrap(address(token1)),
+            fee: 0x800000,
+            tickSpacing: 60,
+            hooks: IHooks(HOOK)
+        });
+
+        vault = new Vault(
+            IPoolManager(address(pool)),
+            key,
+            IStrategy(address(strategy)),
+            IProtocolHook(HOOK),
+            OWNER,
+            TVL_CAP,
+            "v",
+            "v"
+        );
+    }
+
+    function test_rebalance_revertsWhenStrategyGateClosed() public {
+        strategy.set(-600, 600, false);
+        vm.expectRevert(Errors.RebalanceNotNeeded.selector);
+        vault.rebalance();
+    }
+
+    function test_rebalance_emptyVaultDeploysAndCreditsKeeperBonus() public {
+        // Pre-mint shares to a depositor + DEAD so the bonus has a base
+        // to pro-rate against. 100_000 supply → 5 bps = 50 share bonus.
+        deal(address(vault), address(0xBEEF), 99_000, true);
+        deal(address(vault), 0x000000000000000000000000000000000000dEaD, 1000, true);
+
+        // Vault holds 1_000 of each token idle.
+        token0.mint(address(vault), 1000);
+        token1.mint(address(vault), 1000);
+
+        // No prior positions to remove. Mock the deploy delta: vault
+        // owes 800 of each (the strategy consumes 80% of idle).
+        pool.setDelta(int128(-800), int128(-800));
+
+        address keeper = address(0xBEE9E2);
+        vm.prank(keeper);
+        vault.rebalance();
+
+        // One position deployed.
+        Vault.Position[] memory ps = vault.getPositions();
+        assertEq(ps.length, 1, "position count");
+
+        // Keeper bonus: 5 bps of 100_000 = 50 shares.
+        assertEq(vault.balanceOf(keeper), 50, "keeper bonus");
+
+        // Last-rebalance state recorded — currentTick was 0 from setUp.
+        assertEq(vault.lastRebalanceTick(), 0, "lastRebalanceTick");
+        assertEq(vault.lastRebalanceTimestamp(), block.timestamp, "lastRebalanceTimestamp");
+    }
+
+    function test_rebalance_revertsOnBadStrategyShape() public {
+        // Strategy returns 0 positions — invariant 3 trip.
+        BadStrategy bad = new BadStrategy();
+        vault = new Vault(
+            IPoolManager(address(pool)), key, IStrategy(address(bad)), IProtocolHook(HOOK), OWNER, TVL_CAP, "v", "v"
+        );
+
+        vm.expectRevert();
+        vault.rebalance();
+    }
+
+    function test_getTotalAmounts_emptyPositions_returnsIdleOnly() public {
+        token0.mint(address(vault), 12_345);
+        token1.mint(address(vault), 67_890);
+
+        (uint256 a, uint256 b) = vault.getTotalAmounts();
+        assertEq(a, 12_345, "total0");
+        assertEq(b, 67_890, "total1");
+    }
+}
+
+/// Strategy that misbehaves — returns zero positions. Exercises invariant 3.
+contract BadStrategy is IStrategy {
+    function computePositions(
+        int24,
+        int24,
+        uint256,
+        uint256
+    )
+        external
+        pure
+        override
+        returns (TargetPosition[] memory)
+    {
+        return new TargetPosition[](0);
+    }
+
+    function shouldRebalance(int24, int24, uint256) external pure override returns (bool) {
+        return true;
     }
 }
