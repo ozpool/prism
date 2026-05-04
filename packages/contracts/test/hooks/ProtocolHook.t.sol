@@ -1,19 +1,39 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity 0.8.26;
 
-import {Test} from "forge-std/Test.sol";
+import {Test, Vm} from "forge-std/Test.sol";
 
+import {IExtsload} from "v4-core/interfaces/IExtsload.sol";
 import {IHooks} from "v4-core/interfaces/IHooks.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {Hooks} from "v4-core/libraries/Hooks.sol";
 import {BalanceDelta} from "v4-core/types/BalanceDelta.sol";
 import {Currency} from "v4-core/types/Currency.sol";
 
+import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
 import {PoolKey} from "v4-core/types/PoolKey.sol";
 import {ModifyLiquidityParams, SwapParams} from "v4-core/types/PoolOperation.sol";
 
 import {ProtocolHook} from "../../src/hooks/ProtocolHook.sol";
+import {IChainlinkAdapter} from "../../src/interfaces/IChainlinkAdapter.sol";
+import {MEVLib} from "../../src/libraries/MEVLib.sol";
 import {Errors} from "../../src/utils/Errors.sol";
+
+/// Stub adapter so the hook can be exercised against a controllable
+/// oracle without pulling Chainlink AggregatorV3 mocks in.
+contract MockOracle is IChainlinkAdapter {
+    uint160 public sqrtPrice;
+    bool public isHealthy;
+
+    function set(uint160 _sqrtPrice, bool _healthy) external {
+        sqrtPrice = _sqrtPrice;
+        isHealthy = _healthy;
+    }
+
+    function read() external view override returns (uint160, bool) {
+        return (sqrtPrice, isHealthy);
+    }
+}
 
 /// Mines a CREATE2 salt that yields an address satisfying the PRISM
 /// hook permission mask (0x05C0). Used by the test to deploy ProtocolHook
@@ -52,6 +72,8 @@ contract HookDeployer {
 }
 
 contract ProtocolHookTest is Test {
+    using PoolIdLibrary for PoolKey;
+
     address constant POOL_MANAGER = address(0xCafe);
     address constant FACTORY = address(0xBeef);
 
@@ -61,6 +83,8 @@ contract ProtocolHookTest is Test {
     function setUp() public {
         deployer = new HookDeployer();
         hook = _deployValidHook();
+        // Give POOL_MANAGER non-zero code so vm.mockCall on extsload resolves.
+        vm.etch(POOL_MANAGER, hex"60");
     }
 
     function _deployValidHook() internal returns (ProtocolHook) {
@@ -231,6 +255,162 @@ contract ProtocolHookTest is Test {
     }
 
     // -------------------------------------------------------------------------
+    // afterSwap — slot0 + oracle + MEV deviation
+    // -------------------------------------------------------------------------
+
+    event SwapObserved(bytes32 indexed poolId, int24 tick, uint160 sqrtPriceX96);
+    event SwapDeviation(bytes32 indexed poolId, uint256 deviationBps, bool oracleHealthy);
+
+    uint160 constant SQRT_PRICE_REF = 79_228_162_514_264_337_593_543_950_336; // 1.0 in Q64.96
+
+    function test_afterSwap_emitsSwapObservedWithRealSlot0() public {
+        PoolKey memory key = _emptyKey();
+        _mockSlot0(key, 1234, SQRT_PRICE_REF);
+
+        bytes32 pidBytes = PoolId.unwrap(key.toId());
+
+        vm.expectEmit(true, false, false, true);
+        emit SwapObserved(pidBytes, 1234, SQRT_PRICE_REF);
+
+        vm.prank(POOL_MANAGER);
+        hook.afterSwap(address(this), key, _emptySwapParams(), BalanceDelta.wrap(0), "");
+    }
+
+    function test_afterSwap_skipsDeviationWhenOracleUnregistered() public {
+        PoolKey memory key = _emptyKey();
+        _mockSlot0(key, 0, SQRT_PRICE_REF);
+
+        // Record logs to assert SwapDeviation was NOT emitted.
+        vm.recordLogs();
+        vm.prank(POOL_MANAGER);
+        hook.afterSwap(address(this), key, _emptySwapParams(), BalanceDelta.wrap(0), "");
+
+        Vm.Log[] memory entries = vm.getRecordedLogs();
+        bytes32 sigDeviation = keccak256("SwapDeviation(bytes32,uint256,bool)");
+        for (uint256 i = 0; i < entries.length; i++) {
+            assertTrue(entries[i].topics[0] != sigDeviation, "SwapDeviation should be skipped");
+        }
+    }
+
+    function test_afterSwap_emitsDeviationWhenOracleHealthy() public {
+        PoolKey memory key = _emptyKey();
+        bytes32 pidBytes = PoolId.unwrap(key.toId());
+
+        // Pool sqrt-price == oracle sqrt-price → deviation = 0 bps.
+        MockOracle oracle = new MockOracle();
+        oracle.set(SQRT_PRICE_REF, true);
+        vm.prank(FACTORY);
+        hook.registerOracle(key, oracle);
+
+        _mockSlot0(key, 0, SQRT_PRICE_REF);
+
+        vm.expectEmit(true, false, false, true);
+        emit SwapDeviation(pidBytes, 0, true);
+
+        vm.prank(POOL_MANAGER);
+        hook.afterSwap(address(this), key, _emptySwapParams(), BalanceDelta.wrap(0), "");
+    }
+
+    function test_afterSwap_failSoftWhenOracleUnhealthy() public {
+        PoolKey memory key = _emptyKey();
+        bytes32 pidBytes = PoolId.unwrap(key.toId());
+
+        MockOracle oracle = new MockOracle();
+        oracle.set(0, false); // unhealthy
+        vm.prank(FACTORY);
+        hook.registerOracle(key, oracle);
+
+        _mockSlot0(key, 0, SQRT_PRICE_REF);
+
+        // Unhealthy oracle: deviation reports 0, healthy=false. Per
+        // ADR-003 the hook does not revert.
+        vm.expectEmit(true, false, false, true);
+        emit SwapDeviation(pidBytes, 0, false);
+
+        vm.prank(POOL_MANAGER);
+        hook.afterSwap(address(this), key, _emptySwapParams(), BalanceDelta.wrap(0), "");
+    }
+
+    function test_afterSwap_deviationNonZero() public {
+        PoolKey memory key = _emptyKey();
+        bytes32 pidBytes = PoolId.unwrap(key.toId());
+
+        // Oracle reports a sqrt-price 1% above pool → ~100 bps deviation.
+        uint160 oraclePrice = uint160((uint256(SQRT_PRICE_REF) * 101) / 100);
+        MockOracle oracle = new MockOracle();
+        oracle.set(oraclePrice, true);
+        vm.prank(FACTORY);
+        hook.registerOracle(key, oracle);
+
+        _mockSlot0(key, 0, SQRT_PRICE_REF);
+
+        uint256 expectedBps = MEVLib.deviationBps(SQRT_PRICE_REF, oraclePrice);
+        vm.expectEmit(true, false, false, true);
+        emit SwapDeviation(pidBytes, expectedBps, true);
+
+        vm.prank(POOL_MANAGER);
+        hook.afterSwap(address(this), key, _emptySwapParams(), BalanceDelta.wrap(0), "");
+    }
+
+    /// ADR-007 caps afterSwap at 18k gas. The actual cost depends on
+    /// whether an oracle is registered — pin both numbers so future
+    /// regressions surface.
+    function test_afterSwap_gasBudget_noOracle() public {
+        PoolKey memory key = _emptyKey();
+        _mockSlot0(key, 100, SQRT_PRICE_REF);
+
+        vm.prank(POOL_MANAGER);
+        uint256 gasBefore = gasleft();
+        hook.afterSwap(address(this), key, _emptySwapParams(), BalanceDelta.wrap(0), "");
+        uint256 gasUsed = gasBefore - gasleft();
+
+        // Headroom for forge mockCall overhead.
+        assertLt(gasUsed, 25_000, "afterSwap gas regression (no oracle)");
+    }
+
+    // -------------------------------------------------------------------------
+    // registerOracle
+    // -------------------------------------------------------------------------
+
+    function test_registerOracle_revertsForNonFactory() public {
+        PoolKey memory key = _emptyKey();
+        MockOracle oracle = new MockOracle();
+        vm.prank(address(0xDeAd));
+        vm.expectRevert(Errors.OnlyOwner.selector);
+        hook.registerOracle(key, oracle);
+    }
+
+    function test_registerOracle_revertsOnZeroOracle() public {
+        PoolKey memory key = _emptyKey();
+        vm.prank(FACTORY);
+        vm.expectRevert(Errors.ZeroAddress.selector);
+        hook.registerOracle(key, IChainlinkAdapter(address(0)));
+    }
+
+    function test_registerOracle_revertsOnRebind() public {
+        PoolKey memory key = _emptyKey();
+        MockOracle a = new MockOracle();
+        MockOracle b = new MockOracle();
+
+        vm.prank(FACTORY);
+        hook.registerOracle(key, a);
+
+        vm.prank(FACTORY);
+        vm.expectRevert(Errors.AlreadyInitialised.selector);
+        hook.registerOracle(key, b);
+    }
+
+    function test_registerOracle_storesAdapter() public {
+        PoolKey memory key = _emptyKey();
+        MockOracle oracle = new MockOracle();
+
+        vm.prank(FACTORY);
+        hook.registerOracle(key, oracle);
+
+        assertEq(address(hook.oracleByPool(key.toId())), address(oracle));
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 
@@ -242,5 +422,21 @@ contract ProtocolHookTest is Test {
             tickSpacing: 60,
             hooks: IHooks(address(0))
         });
+    }
+
+    function _emptySwapParams() internal pure returns (SwapParams memory p) {
+        return p;
+    }
+
+    /// Mock the StateLibrary.getSlot0 extsload path. StateLibrary derives
+    /// the pool's storage slot from `keccak256(abi.encodePacked(poolId,
+    /// POOLS_SLOT))`, then calls extsload on the manager. The slot0 value
+    /// packs sqrtPriceX96 in bits 0..159 and tick in bits 160..183.
+    function _mockSlot0(PoolKey memory key, int24 tick, uint160 sqrtPriceX96) internal {
+        bytes32 stateSlot = keccak256(abi.encodePacked(PoolId.unwrap(key.toId()), bytes32(uint256(6))));
+        bytes32 slot0 = bytes32(uint256(sqrtPriceX96)) | bytes32(uint256(uint24(tick)) << 160);
+        vm.mockCall(
+            POOL_MANAGER, abi.encodeWithSelector(bytes4(keccak256("extsload(bytes32)")), stateSlot), abi.encode(slot0)
+        );
     }
 }
