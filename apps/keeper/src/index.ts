@@ -4,8 +4,11 @@ import {baseSepolia} from "viem/chains";
 import pino from "pino";
 
 import {loadConfig} from "./config.js";
+import {Metrics} from "./metrics.js";
 import {runPollLoop} from "./poll.js";
 import {gweiToWei} from "./submit.js";
+
+const METRIC_SNAPSHOT_INTERVAL_MS = 60_000;
 
 async function main() {
   const config = loadConfig();
@@ -52,6 +55,8 @@ async function main() {
     writeContract: walletClient.writeContract,
   } as unknown as Parameters<typeof runPollLoop>[0]["client"];
 
+  const metrics = new Metrics();
+
   const stop = runPollLoop({
     client,
     factory: config.VAULT_FACTORY_ADDRESS as Address,
@@ -62,13 +67,22 @@ async function main() {
     maxSubmitAttempts: 3,
     intervalMs: config.POLL_INTERVAL_MS,
     logger,
+    metrics,
   });
+
+  // Periodic metric snapshot — emits one structured log line per minute
+  // with cycle counts + p50/p99 latency. /metrics HTTP endpoint that
+  // exposes the same numbers lands in #60.
+  const metricTimer = setInterval(() => {
+    logger.info({metrics: metrics.snapshot()}, "metric snapshot");
+  }, METRIC_SNAPSHOT_INTERVAL_MS);
 
   // #60 hardens this further: /health endpoint + structured shutdown
   // semantics on both SIGTERM + SIGINT.
   await new Promise<void>((resolve) => {
     process.on("SIGTERM", () => {
       logger.info("SIGTERM received — draining in-flight cycle");
+      clearInterval(metricTimer);
       stop().then(resolve);
     });
   });
