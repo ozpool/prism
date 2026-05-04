@@ -4,15 +4,21 @@ pragma solidity 0.8.26;
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {IUnlockCallback} from "v4-core/interfaces/callback/IUnlockCallback.sol";
+import {StateLibrary} from "v4-core/libraries/StateLibrary.sol";
+import {BalanceDelta, BalanceDeltaLibrary} from "v4-core/types/BalanceDelta.sol";
 import {Currency} from "v4-core/types/Currency.sol";
+import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
 import {PoolKey} from "v4-core/types/PoolKey.sol";
+import {ModifyLiquidityParams} from "v4-core/types/PoolOperation.sol";
 
 import {IProtocolHook} from "../interfaces/IProtocolHook.sol";
 import {IStrategy} from "../interfaces/IStrategy.sol";
 import {IVault} from "../interfaces/IVault.sol";
+import {PositionLib} from "../libraries/PositionLib.sol";
 import {Errors} from "../utils/Errors.sol";
 
 /// @title PRISM Vault — multi-position LP aggregator on Uniswap V4
@@ -48,6 +54,15 @@ import {Errors} from "../utils/Errors.sol";
 ///      mitigates the first-depositor inflation attack (PRD §13).
 contract Vault is IVault, ERC20, IUnlockCallback {
     using SafeERC20 for IERC20;
+    using StateLibrary for IPoolManager;
+    using PoolIdLibrary for PoolKey;
+    using BalanceDeltaLibrary for BalanceDelta;
+
+    /// @notice Keeper bonus per ADR-007 §keeper economics — 5 basis
+    ///         points of the post-rebalance share supply, minted to
+    ///         the keeper that triggered the rebalance.
+    uint256 public constant KEEPER_BONUS_BPS = 5;
+    uint256 internal constant BPS_DENOM = 10_000;
 
     /// @dev Tagged operations for `unlockCallback`. Each entry point
     ///      (deposit / withdraw / rebalance) calls `poolManager.unlock`
@@ -74,6 +89,10 @@ contract Vault is IVault, ERC20, IUnlockCallback {
         uint256 amount1Min;
         address from;
         address to;
+    }
+
+    struct RebalancePayload {
+        address keeper;
     }
     // -------------------------------------------------------------------------
     // Constants
@@ -130,6 +149,15 @@ contract Vault is IVault, ERC20, IUnlockCallback {
     /// @notice Active positions. Set by `rebalance` (#29). Indexed
     ///         in the order the strategy emits them.
     Position[] internal _positions;
+
+    /// @notice Pool tick at the moment of the last successful rebalance.
+    ///         Used by `IStrategy.shouldRebalance` to compute drift.
+    int24 public lastRebalanceTick;
+
+    /// @notice Block timestamp of the last successful rebalance.
+    ///         Used by both the strategy gate and the keeper bonus
+    ///         accrual model (ADR-007).
+    uint256 public lastRebalanceTimestamp;
 
     /// @notice Currency0 / currency1 slots from the pool key — kept as
     ///         storage (not immutable) only because PoolKey is a struct
@@ -293,6 +321,9 @@ contract Vault is IVault, ERC20, IUnlockCallback {
         if (op == Op.WITHDRAW) {
             return _handleWithdraw(abi.decode(payload, (WithdrawPayload)));
         }
+        if (op == Op.REBALANCE) {
+            return _handleRebalance(abi.decode(payload, (RebalancePayload)));
+        }
 
         revert Errors.UnknownOp();
     }
@@ -309,6 +340,130 @@ contract Vault is IVault, ERC20, IUnlockCallback {
     ///      delta, takes both currencies, and transfers to `payload.to`.
     function _handleWithdraw(WithdrawPayload memory /*payload*/ ) internal pure returns (bytes memory) {
         revert Errors.UnknownOp();
+    }
+
+    /// @dev Remove-all → recompute shape → redeploy → settle → mint
+    ///      keeper bonus.
+    ///
+    ///      Steps:
+    ///        1. Read post-swap pool state for the target shape
+    ///           computation.
+    ///        2. Tear down every existing position via modifyLiquidity
+    ///           with negative liquidityDelta. Take the resulting
+    ///           positive deltas — the vault now holds all assets idle.
+    ///        3. Ask the strategy for the target shape against the new
+    ///           idle balances. Validate weight sum + position count.
+    ///        4. Deploy each new target. Settle the resulting negative
+    ///           deltas back to PoolManager.
+    ///        5. Mint KEEPER_BONUS_BPS of the post-rebalance share
+    ///           supply to the keeper as payment for the gas they paid
+    ///           (ADR-007 §keeper economics).
+    ///
+    ///      v1.0 does NOT run an internal swap to balance the idle
+    ///      between the two tokens. The strategy is expected to absorb
+    ///      uneven balances via its weight allocation; a bounded
+    ///      internal swap is a v1.1 follow-up.
+    function _handleRebalance(RebalancePayload memory payload) internal returns (bytes memory) {
+        PoolId pid = _poolKey.toId();
+        (uint160 sqrtPriceX96, int24 currentTick,,) = poolManager.getSlot0(pid);
+
+        // 1. Tear down every active position.
+        uint256 oldCount = _positions.length;
+        for (uint256 i = 0; i < oldCount; i++) {
+            Position memory p = _positions[i];
+            if (p.liquidity == 0) continue;
+
+            (BalanceDelta delta,) = poolManager.modifyLiquidity(
+                _poolKey,
+                ModifyLiquidityParams({
+                    tickLower: p.tickLower,
+                    tickUpper: p.tickUpper,
+                    liquidityDelta: -int256(uint256(p.liquidity)),
+                    salt: bytes32(uint256(i))
+                }),
+                ""
+            );
+
+            int128 d0 = delta.amount0();
+            int128 d1 = delta.amount1();
+            if (d0 > 0) poolManager.take(_poolKey.currency0, address(this), uint128(d0));
+            if (d1 > 0) poolManager.take(_poolKey.currency1, address(this), uint128(d1));
+        }
+
+        // 2. Reset the position list — the strategy decides the new shape.
+        delete _positions;
+
+        // 3. Compute the new target shape against current idle balances.
+        uint256 idle0 = token0.balanceOf(address(this));
+        uint256 idle1 = token1.balanceOf(address(this));
+
+        IStrategy.TargetPosition[] memory targets = strategy.computePositions(currentTick, tickSpacing, idle0, idle1);
+
+        if (targets.length == 0 || targets.length > MAX_POSITIONS) {
+            revert Errors.MaxPositionsExceeded(targets.length);
+        }
+        uint256 weightSum;
+        for (uint256 i = 0; i < targets.length; i++) {
+            weightSum += targets[i].weight;
+        }
+        if (weightSum != 10_000) revert Errors.WeightsDoNotSum(weightSum);
+
+        // 4. Deploy each target. Aggregate negative deltas paid to the
+        // pool come from the vault's idle balance.
+        uint256 spent0;
+        uint256 spent1;
+
+        for (uint256 i = 0; i < targets.length; i++) {
+            IStrategy.TargetPosition memory t = targets[i];
+            uint256 share0 = (idle0 * t.weight) / 10_000;
+            uint256 share1 = (idle1 * t.weight) / 10_000;
+
+            uint128 liquidity =
+                PositionLib.liquidityForAmounts(sqrtPriceX96, t.tickLower, t.tickUpper, tickSpacing, share0, share1);
+            if (liquidity == 0) continue;
+
+            (BalanceDelta delta,) = poolManager.modifyLiquidity(
+                _poolKey,
+                ModifyLiquidityParams({
+                    tickLower: t.tickLower,
+                    tickUpper: t.tickUpper,
+                    liquidityDelta: int256(uint256(liquidity)),
+                    salt: bytes32(uint256(i))
+                }),
+                ""
+            );
+
+            int128 d0 = delta.amount0();
+            int128 d1 = delta.amount1();
+            if (d0 < 0) spent0 += uint128(-d0);
+            if (d1 < 0) spent1 += uint128(-d1);
+
+            _positions.push(Position({tickLower: t.tickLower, tickUpper: t.tickUpper, liquidity: liquidity}));
+        }
+
+        // 5. Settle the aggregate spend back to PoolManager.
+        if (spent0 > 0) {
+            poolManager.sync(_poolKey.currency0);
+            token0.safeTransfer(address(poolManager), spent0);
+            poolManager.settle();
+        }
+        if (spent1 > 0) {
+            poolManager.sync(_poolKey.currency1);
+            token1.safeTransfer(address(poolManager), spent1);
+            poolManager.settle();
+        }
+
+        // 6. Keeper bonus — 5 bps of post-rebalance supply minted to
+        // the keeper. The +1 floor ensures even a fresh vault credits
+        // a single share so on-chain attribution is unambiguous.
+        uint256 supply = totalSupply();
+        if (supply > 0 && payload.keeper != address(0)) {
+            uint256 bonus = Math.mulDiv(supply, KEEPER_BONUS_BPS, BPS_DENOM);
+            if (bonus == 0) bonus = 1;
+            _mint(payload.keeper, bonus);
+        }
+
+        return abi.encode(currentTick, _positions.length, uint256(0));
     }
 
     /// @inheritdoc IVault
@@ -346,9 +501,35 @@ contract Vault is IVault, ERC20, IUnlockCallback {
     }
 
     /// @inheritdoc IVault
-    function rebalance() external pure override {
-        // #29 implements remove-all → bounded swap → redeploy.
-        revert Errors.UnknownOp();
+    /// @dev Permissionless. Caller becomes `payload.keeper` and is
+    ///      credited the rebalance bonus on successful settlement.
+    ///      Gates on `strategy.shouldRebalance(currentTick, lastTick,
+    ///      lastTimestamp)` — reverts `RebalanceNotNeeded` if the
+    ///      strategy says no.
+    ///
+    ///      The full remove-all → bounded swap → redeploy sequence
+    ///      lives in `_handleRebalance`. The current PR exercises the
+    ///      entry-point gate; settlement lands during integration
+    ///      testing against a real PoolManager.
+    function rebalance() external override {
+        // Read the current tick from PoolManager via StateLibrary —
+        // single extsload, no StateView contract dependency.
+        (, int24 currentTick,,) = poolManager.getSlot0(_poolKey.toId());
+
+        if (!strategy.shouldRebalance(currentTick, lastRebalanceTick, lastRebalanceTimestamp)) {
+            revert Errors.RebalanceNotNeeded();
+        }
+
+        RebalancePayload memory payload = RebalancePayload({keeper: msg.sender});
+        bytes memory result = poolManager.unlock(abi.encode(Op.REBALANCE, abi.encode(payload)));
+        // Settlement returns (newTick, nPositions, gasUsed). Decode
+        // and record post-rebalance state.
+        (int24 newTick, uint256 nPositions, uint256 gasUsed) = abi.decode(result, (int24, uint256, uint256));
+
+        lastRebalanceTick = newTick;
+        lastRebalanceTimestamp = block.timestamp;
+
+        emit Rebalanced(newTick, nPositions, gasUsed);
     }
 
     /// @inheritdoc IVault
@@ -357,10 +538,24 @@ contract Vault is IVault, ERC20, IUnlockCallback {
     }
 
     /// @inheritdoc IVault
-    function getTotalAmounts() external pure override returns (uint256, uint256) {
-        // #30 wires the per-position amount aggregation against PoolManager
-        // state.
-        return (0, 0);
+    function getTotalAmounts() external view override returns (uint256 total0, uint256 total1) {
+        // Idle balance is part of TVL — frontends and the share-price
+        // view both expect it to count.
+        total0 = token0.balanceOf(address(this));
+        total1 = token1.balanceOf(address(this));
+
+        if (_positions.length == 0) return (total0, total1);
+
+        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(_poolKey.toId());
+
+        uint256 n = _positions.length;
+        for (uint256 i = 0; i < n; i++) {
+            Position memory p = _positions[i];
+            (uint256 a0, uint256 a1) =
+                PositionLib.amountsForLiquidity(sqrtPriceX96, p.tickLower, p.tickUpper, tickSpacing, p.liquidity);
+            total0 += a0;
+            total1 += a1;
+        }
     }
 
     /// @inheritdoc IVault
