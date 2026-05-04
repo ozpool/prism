@@ -1,5 +1,9 @@
 # PRISM
 
+[![License: BUSL-1.1](https://img.shields.io/badge/license-BUSL--1.1-yellow.svg)](./LICENSE)
+[![Solidity 0.8.26](https://img.shields.io/badge/solidity-0.8.26-blue.svg)](./packages/contracts/foundry.toml)
+[![Status: M0 — Foundations](https://img.shields.io/badge/status-M0%20Foundations-orange.svg)](./README.md#development-phases)
+
 > **Liquidity Management Protocol on Uniswap V4** — a permissionless,
 > automated LM protocol that refracts a single LP deposit into N tick-range
 > positions, rebalances atomically via flash accounting, charges
@@ -132,7 +136,7 @@ Current status: **M0 · Foundations** (in progress).
 
 | Concern | Tool |
 |---|---|
-| Smart contracts | Solidity 0.8.25, Foundry (`via_ir`, `cancun`) |
+| Smart contracts | Solidity 0.8.26, Foundry (`via_ir`, `cancun`) |
 | V4 dependencies | `v4-core`, `v4-periphery` (pinned by commit) |
 | Token utilities | Solmate / Solady |
 | Static analysis | Slither + Aderyn |
@@ -209,7 +213,7 @@ prism/
 │   ├── web/                 Next.js 14 dApp + marketing
 │   └── keeper/              TypeScript + viem keeper bot
 ├── packages/
-│   ├── contracts/           Foundry project (Solidity 0.8.25)
+│   ├── contracts/           Foundry project (Solidity 0.8.26)
 │   │   ├── src/{core,strategies,libraries,oracles,interfaces,utils}
 │   │   ├── test/{unit, fuzz, invariants}
 │   │   └── script/Deploy.s.sol
@@ -265,10 +269,33 @@ issue [#70](../../issues/70)). Responsible disclosure lives in
 - **Core contracts:** BUSL-1.1
 - **Libraries:** MIT
 
+## PRD Section Map
+
+If you're trying to understand a specific subsystem, jump straight to
+the relevant section of the PRD rather than reading top-to-bottom:
+
+| Topic | PRD section |
+|---|---|
+| Product positioning, who PRISM is for | §1 Vision |
+| Seven invariants (the contract-level laws) | §2 Invariants |
+| Vault, Strategy, Hook, Oracle architecture | §3 System Architecture |
+| Swap-time hook flow + fee math | §4 Hook Behaviour |
+| Rebalance flow + slippage bounds | §5 Rebalance |
+| Threat model + first-depositor inflation | §6 Security |
+| Gas budgets + keeper economics | §7 Economics ([ADR-007](./docs/adrs/ADR-007-gas-budget.md)) |
+| Migration playbook (no proxies) | §8 Operations ([ADR-006](./docs/adrs/ADR-006-immutable-core.md)) |
+| Off-chain infra: keeper, monitoring | §9 Off-chain |
+| Day-1 anti-goals and scope discipline | §10 Anti-goals |
+
+Architecture decisions live in [`docs/adrs/`](./docs/adrs/). Each ADR is
+versioned, dated, and referenced by the implementation issue that
+locked it in.
+
 ## Links
 
 - [Product Requirements Document (v1.0)](./PRISM_PRD_v1.0.html) — complete technical spec
 - [Architectural context](./CLAUDE.md) — invariants, risk posture, delegation map
+- [Architecture Decision Records](./docs/adrs/) — locked design decisions with rationale
 - [Open issues](../../issues) — backlog by milestone and layer
 - [Project milestones](../../milestones) — M0 → M5
 
