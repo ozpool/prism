@@ -10,6 +10,7 @@ import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {IUnlockCallback} from "v4-core/interfaces/callback/IUnlockCallback.sol";
 import {BalanceDelta, toBalanceDelta} from "v4-core/types/BalanceDelta.sol";
 import {Currency} from "v4-core/types/Currency.sol";
+import {PoolId} from "v4-core/types/PoolId.sol";
 import {PoolKey} from "v4-core/types/PoolKey.sol";
 import {ModifyLiquidityParams} from "v4-core/types/PoolOperation.sol";
 
@@ -18,7 +19,7 @@ import {IProtocolHook} from "../../src/interfaces/IProtocolHook.sol";
 import {IStrategy} from "../../src/interfaces/IStrategy.sol";
 import {Errors} from "../../src/utils/Errors.sol";
 
-/// Minimal ERC20 used by the withdraw-body integration tests.
+/// Minimal ERC20 used by the rebalance-body integration tests.
 contract MockERC20 is ERC20 {
     constructor(string memory n, string memory s) ERC20(n, s) {}
 
@@ -27,16 +28,53 @@ contract MockERC20 is ERC20 {
     }
 }
 
-/// Minimal PoolManager stand-in that drives `unlock` straight back into
-/// the caller's `unlockCallback` and returns a configurable
-/// BalanceDelta from `modifyLiquidity`. Real pool flow is exercised in
-/// the fork suite (#42); here we only need enough to drive the
-/// unlock callback shape.
+/// Stub strategy: returns one position with weight 10_000 and a
+/// configurable shouldRebalance verdict.
+contract MockStrategy is IStrategy {
+    int24 public lowerTick;
+    int24 public upperTick;
+    bool public rebalanceVerdict = true;
+
+    function set(int24 l, int24 u, bool gate) external {
+        lowerTick = l;
+        upperTick = u;
+        rebalanceVerdict = gate;
+    }
+
+    function computePositions(
+        int24,
+        int24,
+        uint256,
+        uint256
+    )
+        external
+        view
+        override
+        returns (TargetPosition[] memory)
+    {
+        TargetPosition[] memory ps = new TargetPosition[](1);
+        ps[0] = TargetPosition({tickLower: lowerTick, tickUpper: upperTick, weight: 10_000});
+        return ps;
+    }
+
+    function shouldRebalance(int24, int24, uint256) external view override returns (bool) {
+        return rebalanceVerdict;
+    }
+}
+
+/// Minimal PoolManager stand-in. modifyLiquidity returns a configurable
+/// per-call delta — the test sets it before each modifyLiquidity to
+/// drive remove vs deploy paths through the same mock.
 contract MockPoolManager {
     BalanceDelta public mockedDelta;
+    bytes32 public mockedSlot0;
 
     function setDelta(int128 d0, int128 d1) external {
         mockedDelta = toBalanceDelta(d0, d1);
+    }
+
+    function setSlot0(uint160 sqrtPriceX96, int24 tick) external {
+        mockedSlot0 = bytes32(uint256(sqrtPriceX96)) | bytes32(uint256(uint24(tick)) << 160);
     }
 
     function unlock(bytes calldata data) external returns (bytes memory) {
@@ -55,10 +93,6 @@ contract MockPoolManager {
         return (mockedDelta, BalanceDelta.wrap(0));
     }
 
-    /// take() in the real PoolManager transfers from manager to recipient.
-    /// We mirror that here so the vault's post-take balance accounting
-    /// matches production. Tests fund the manager with the tokens they
-    /// expect to be paid out.
     function take(Currency currency, address to, uint256 amount) external {
         ERC20(Currency.unwrap(currency)).transfer(to, amount);
     }
@@ -69,8 +103,8 @@ contract MockPoolManager {
 
     function sync(Currency) external {}
 
-    function extsload(bytes32) external pure returns (bytes32) {
-        return bytes32(0);
+    function extsload(bytes32) external view returns (bytes32) {
+        return mockedSlot0;
     }
 }
 
@@ -302,17 +336,34 @@ contract VaultStorageTest is Test {
         vault.withdraw(0, 0, 0, address(this));
     }
 
-    function test_rebalance_stubReverts() public {
-        vm.expectRevert(Errors.UnknownOp.selector);
+    function test_rebalance_revertsWhenStrategyGateClosed() public {
+        // Mock the StateLibrary.getSlot0 extsload + the strategy gate.
+        // The pool manager is a stub address with no code, so extsload
+        // would otherwise revert before reaching the strategy check.
+        vm.etch(POOL_MANAGER, hex"60");
+        vm.mockCall(
+            POOL_MANAGER, abi.encodeWithSelector(bytes4(keccak256("extsload(bytes32)"))), abi.encode(bytes32(0))
+        );
+        vm.mockCall(STRATEGY, abi.encodeWithSelector(IStrategy.shouldRebalance.selector), abi.encode(false));
+
+        vm.expectRevert(Errors.RebalanceNotNeeded.selector);
         vault.rebalance();
     }
 
-    function test_views_stubsAreSafe() public view {
+    function test_rebalance_lastTimestampInitiallyZero() public view {
+        assertEq(vault.lastRebalanceTimestamp(), 0);
+        assertEq(vault.lastRebalanceTick(), 0);
+    }
+
+    function test_views_emptyVaultReturnsZeros() public {
         // getPositions returns empty array on a fresh vault.
         Vault.Position[] memory ps = vault.getPositions();
         assertEq(ps.length, 0);
 
-        // getTotalAmounts returns 0/0 stub.
+        // Mock token balances — stub addresses have no code.
+        vm.mockCall(TOKEN0, abi.encodeWithSignature("balanceOf(address)", address(vault)), abi.encode(uint256(0)));
+        vm.mockCall(TOKEN1, abi.encodeWithSignature("balanceOf(address)", address(vault)), abi.encode(uint256(0)));
+
         (uint256 a, uint256 b) = vault.getTotalAmounts();
         assertEq(a, 0);
         assertEq(b, 0);
@@ -334,20 +385,25 @@ contract VaultStorageTest is Test {
 }
 
 // =============================================================================
-// VaultWithdrawTest — exercises _handleWithdraw against the mock pool.
-// Withdraw burns shares up-front, so we mint shares directly via deal() to
-// simulate a prior depositor and seed _positions via vm.store.
+// VaultRebalanceTest — exercises _handleRebalance + currentTick wire-up +
+// getTotalAmounts against the mock pool. Real V4 settle/take is exercised
+// in the fork suite (#42); the mock is enough to drive the dispatch shape
+// and the keeper-bonus math.
 // =============================================================================
 
-contract VaultWithdrawTest is Test {
+contract VaultRebalanceTest is Test {
     address constant HOOK = address(0xB00C);
     address constant OWNER = address(0xACE);
+
+    /// Sqrt-price for tick 0 — gives equal-weight token0/token1 deploys.
+    uint160 constant SQRT_PRICE_TICK_0 = 79_228_162_514_264_337_593_543_950_336;
 
     uint256 constant TVL_CAP = 1_000_000e18;
 
     Vault vault;
     MockERC20 token0;
     MockERC20 token1;
+    MockStrategy strategy;
     MockPoolManager pool;
     PoolKey key;
 
@@ -358,7 +414,11 @@ contract VaultWithdrawTest is Test {
             (token0, token1) = (token1, token0);
         }
 
+        strategy = new MockStrategy();
+        strategy.set(-600, 600, true);
         pool = new MockPoolManager();
+        pool.setSlot0(SQRT_PRICE_TICK_0, 0);
+
         key = PoolKey({
             currency0: Currency.wrap(address(token0)),
             currency1: Currency.wrap(address(token1)),
@@ -368,93 +428,91 @@ contract VaultWithdrawTest is Test {
         });
 
         vault = new Vault(
-            IPoolManager(address(pool)), key, IStrategy(address(0xBEEF)), IProtocolHook(HOOK), OWNER, TVL_CAP, "v", "v"
+            IPoolManager(address(pool)),
+            key,
+            IStrategy(address(strategy)),
+            IProtocolHook(HOOK),
+            OWNER,
+            TVL_CAP,
+            "v",
+            "v"
         );
     }
 
-    function test_withdraw_proportionalRemoveTransfersPayout() public {
-        // Seed: 100 shares total — 90 to alice, 10 to DEAD (MIN_SHARES burn).
-        address alice = address(0xA11CE);
-        deal(address(vault), alice, 90, true);
-        deal(address(vault), 0x000000000000000000000000000000000000dEaD, 10, true);
-        // Single position of 1000 liquidity at [-600, 600].
-        _seedPosition(0, -600, 600, 1000);
-
-        // Vault holds 100 idle of token0, 200 idle of token1 (e.g. fee dust).
-        token0.mint(address(vault), 100);
-        token1.mint(address(vault), 200);
-
-        // modifyLiquidity returns +18 / +27 — alice's 9% liquidity slice (= 90 / 1000).
-        pool.setDelta(int128(18), int128(27));
-        // Manager pre-funded so take() succeeds.
-        token0.mint(address(pool), 18);
-        token1.mint(address(pool), 27);
-
-        vm.prank(alice);
-        (uint256 amount0, uint256 amount1) = vault.withdraw(90, 0, 0, alice);
-
-        // Idle proportional: 90/100 = 90% of idle balance.
-        // owed0 = 18; idleTake0 = 100 * 90 / 100 = 90 → amount0 = 108.
-        // owed1 = 27; idleTake1 = 200 * 90 / 100 = 180 → amount1 = 207.
-        assertEq(amount0, 108, "amount0");
-        assertEq(amount1, 207, "amount1");
-
-        // Recipient received the payout.
-        assertEq(token0.balanceOf(alice), 108, "alice token0");
-        assertEq(token1.balanceOf(alice), 207, "alice token1");
-
-        // Position liquidity reduced by alice's 90% slice (900 of 1000).
-        assertEq(vault.getPositions()[0].liquidity, 1000 - 900, "position liquidity post-burn");
+    function test_rebalance_revertsWhenStrategyGateClosed() public {
+        strategy.set(-600, 600, false);
+        vm.expectRevert(Errors.RebalanceNotNeeded.selector);
+        vault.rebalance();
     }
 
-    function test_withdraw_revertsOnSlippage() public {
-        address alice = address(0xA11CE);
-        deal(address(vault), alice, 50, true);
-        _seedPosition(0, -600, 600, 1000);
-        pool.setDelta(int128(10), int128(10));
-        token0.mint(address(pool), 10);
-        token1.mint(address(pool), 10);
+    function test_rebalance_emptyVaultDeploysAndCreditsKeeperBonus() public {
+        // Pre-mint shares to a depositor + DEAD so the bonus has a base
+        // to pro-rate against. 100_000 supply → 5 bps = 50 share bonus.
+        deal(address(vault), address(0xBEEF), 99_000, true);
+        deal(address(vault), 0x000000000000000000000000000000000000dEaD, 1000, true);
 
-        vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(Errors.SlippageExceeded.selector, 10, 100));
-        vault.withdraw(50, 100, 0, alice);
+        // Vault holds 1_000 of each token idle.
+        token0.mint(address(vault), 1000);
+        token1.mint(address(vault), 1000);
+
+        // No prior positions to remove. Mock the deploy delta: vault
+        // owes 800 of each (the strategy consumes 80% of idle).
+        pool.setDelta(int128(-800), int128(-800));
+
+        address keeper = address(0xBEE9E2);
+        vm.prank(keeper);
+        vault.rebalance();
+
+        // One position deployed.
+        Vault.Position[] memory ps = vault.getPositions();
+        assertEq(ps.length, 1, "position count");
+
+        // Keeper bonus: 5 bps of 100_000 = 50 shares.
+        assertEq(vault.balanceOf(keeper), 50, "keeper bonus");
+
+        // Last-rebalance state recorded — currentTick was 0 from setUp.
+        assertEq(vault.lastRebalanceTick(), 0, "lastRebalanceTick");
+        assertEq(vault.lastRebalanceTimestamp(), block.timestamp, "lastRebalanceTimestamp");
     }
 
-    function test_withdraw_neverPaused_runsToCompletion() public {
-        // Even with deposits paused, withdraw must reach _handleWithdraw.
-        vm.prank(OWNER);
-        vault.setDepositsPaused(true);
+    function test_rebalance_revertsOnBadStrategyShape() public {
+        // Strategy returns 0 positions — invariant 3 trip.
+        BadStrategy bad = new BadStrategy();
+        vault = new Vault(
+            IPoolManager(address(pool)), key, IStrategy(address(bad)), IProtocolHook(HOOK), OWNER, TVL_CAP, "v", "v"
+        );
 
-        address alice = address(0xA11CE);
-        deal(address(vault), alice, 50, true);
-        deal(address(vault), 0x000000000000000000000000000000000000dEaD, 50, true);
-        _seedPosition(0, -600, 600, 1000);
-        pool.setDelta(int128(5), int128(5));
-        token0.mint(address(pool), 5);
-        token1.mint(address(pool), 5);
-
-        vm.prank(alice);
-        (uint256 a0, uint256 a1) = vault.withdraw(50, 0, 0, alice);
-        assertEq(a0, 5, "amount0");
-        assertEq(a1, 5, "amount1");
+        vm.expectRevert();
+        vault.rebalance();
     }
 
-    /// Vault.Position[] is at storage slot 7 in the current layout
-    /// (ERC20 fields 0–4, owner 5, depositsPaused/tvlCap 6, _positions 7).
-    /// Foundry's `vm.store` on a dynamic array sets length at the slot
-    /// itself; the data lives at keccak256(slot). We use the contract's
-    /// own getPositions() helper to verify the seed worked.
-    function _seedPosition(uint256 index, int24 tickLower, int24 tickUpper, uint128 liquidity) internal {
-        bytes32 lengthSlot = bytes32(uint256(7));
-        // Set length to index + 1 (overwrites any previous seed).
-        vm.store(address(vault), lengthSlot, bytes32(uint256(index + 1)));
+    function test_getTotalAmounts_emptyPositions_returnsIdleOnly() public {
+        token0.mint(address(vault), 12_345);
+        token1.mint(address(vault), 67_890);
 
-        bytes32 dataSlot = keccak256(abi.encode(lengthSlot));
-        // Position struct: tickLower (int24) + tickUpper (int24) + liquidity (uint128)
-        // pack into one 256-bit slot per index. tickLower in bits 0..23,
-        // tickUpper in 24..47, liquidity in 48..175.
-        uint256 packed = (uint256(uint24(tickLower)) & ((1 << 24) - 1))
-            | ((uint256(uint24(tickUpper)) & ((1 << 24) - 1)) << 24) | (uint256(liquidity) << 48);
-        vm.store(address(vault), bytes32(uint256(dataSlot) + index), bytes32(packed));
+        (uint256 a, uint256 b) = vault.getTotalAmounts();
+        assertEq(a, 12_345, "total0");
+        assertEq(b, 67_890, "total1");
+    }
+}
+
+/// Strategy that misbehaves — returns zero positions. Exercises invariant 3.
+contract BadStrategy is IStrategy {
+    function computePositions(
+        int24,
+        int24,
+        uint256,
+        uint256
+    )
+        external
+        pure
+        override
+        returns (TargetPosition[] memory)
+    {
+        return new TargetPosition[](0);
+    }
+
+    function shouldRebalance(int24, int24, uint256) external pure override returns (bool) {
+        return true;
     }
 }
