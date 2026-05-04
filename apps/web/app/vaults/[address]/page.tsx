@@ -2,8 +2,9 @@
 
 import {notFound} from "next/navigation";
 import {useMemo} from "react";
-import {isAddress} from "viem";
+import {isAddress, zeroAddress, type Address} from "viem";
 
+import {DepositForm} from "@/components/DepositForm";
 import {PrismVisual, type PrismPosition} from "@/components/PrismVisual";
 import {formatBps, formatUsd} from "@/lib/vault-list";
 
@@ -41,7 +42,11 @@ export default function VaultDetailPage({params}: PageProps) {
 
       <PositionsTable positions={detail.positions} />
 
-      <DepositPanel placeholder />
+      <DepositForm
+        vaultAddress={detail.address as Address}
+        token0={detail.token0}
+        token1={detail.token1}
+      />
     </article>
   );
 }
@@ -108,22 +113,15 @@ function PositionsTable({positions}: {positions: PlaceholderPosition[]}) {
   );
 }
 
-function DepositPanel({placeholder}: {placeholder: boolean}) {
-  return (
-    <section className="rounded-xl border border-border bg-surface p-5 shadow-card">
-      <h2 className="mb-2 text-base font-medium text-text">Deposit</h2>
-      <p className="text-sm text-text-muted">
-        {placeholder
-          ? "Form lands with #52 (deposit form). Wallet + wagmi reads are wired; M2 contracts surface the on-chain state."
-          : null}
-      </p>
-    </section>
-  );
-}
-
 interface PlaceholderPosition extends PrismPosition {
   token0: bigint;
   token1: bigint;
+}
+
+interface PlaceholderToken {
+  address: Address;
+  symbol: string;
+  decimals: number;
 }
 
 interface PlaceholderDetail {
@@ -136,6 +134,8 @@ interface PlaceholderDetail {
   positions: PlaceholderPosition[];
   currentTick: number;
   tickSpacing: number;
+  token0: PlaceholderToken;
+  token1: PlaceholderToken;
 }
 
 function usePlaceholderVault(address: string): PlaceholderDetail {
@@ -157,6 +157,10 @@ function usePlaceholderVault(address: string): PlaceholderDetail {
       ],
       currentTick: 0,
       tickSpacing: 60,
+      // Token metadata is fixed for the placeholder vault; real values
+      // come from the data layer once #31 (VaultFactory) lands.
+      token0: {address: zeroAddress, symbol: "WETH", decimals: 18},
+      token1: {address: zeroAddress, symbol: "USDC", decimals: 6},
     }),
     [address],
   );
