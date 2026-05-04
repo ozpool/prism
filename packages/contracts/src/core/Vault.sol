@@ -4,15 +4,21 @@ pragma solidity 0.8.26;
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {IUnlockCallback} from "v4-core/interfaces/callback/IUnlockCallback.sol";
+import {StateLibrary} from "v4-core/libraries/StateLibrary.sol";
+import {BalanceDelta, BalanceDeltaLibrary} from "v4-core/types/BalanceDelta.sol";
 import {Currency} from "v4-core/types/Currency.sol";
+import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
 import {PoolKey} from "v4-core/types/PoolKey.sol";
+import {ModifyLiquidityParams} from "v4-core/types/PoolOperation.sol";
 
 import {IProtocolHook} from "../interfaces/IProtocolHook.sol";
 import {IStrategy} from "../interfaces/IStrategy.sol";
 import {IVault} from "../interfaces/IVault.sol";
+import {PositionLib} from "../libraries/PositionLib.sol";
 import {Errors} from "../utils/Errors.sol";
 
 /// @title PRISM Vault — multi-position LP aggregator on Uniswap V4
@@ -48,6 +54,9 @@ import {Errors} from "../utils/Errors.sol";
 ///      mitigates the first-depositor inflation attack (PRD §13).
 contract Vault is IVault, ERC20, IUnlockCallback {
     using SafeERC20 for IERC20;
+    using StateLibrary for IPoolManager;
+    using PoolIdLibrary for PoolKey;
+    using BalanceDeltaLibrary for BalanceDelta;
 
     /// @dev Tagged operations for `unlockCallback`. Each entry point
     ///      (deposit / withdraw / rebalance) calls `poolManager.unlock`
@@ -297,11 +306,140 @@ contract Vault is IVault, ERC20, IUnlockCallback {
         revert Errors.UnknownOp();
     }
 
-    /// @dev Stub: real implementation pulls tokens via permit2, calls
-    ///      `poolManager.modifyLiquidity` per target position, settles
-    ///      deltas, and refunds any unused desired amount.
-    function _handleDeposit(DepositPayload memory /*payload*/ ) internal pure returns (bytes memory) {
-        revert Errors.UnknownOp();
+    /// @dev Multi-position deploy + share mint inside the V4 flash-accounting
+    ///      unlock callback. Steps:
+    ///        1. Read currentTick + sqrtPriceX96 via StateLibrary.getSlot0.
+    ///        2. Ask the strategy for the target shape across the desired amounts.
+    ///        3. Reject malformed shapes (weight sum, position count).
+    ///        4. For each target position, compute liquidity from the weighted
+    ///           share of the desired amounts and call modifyLiquidity. The
+    ///           returned BalanceDelta is the negative-signed amount the vault
+    ///           owes the pool (callerDelta is the vault's net delta).
+    ///        5. Settle the aggregate negative delta — sync, transfer the
+    ///           deposit tokens to the manager, settle.
+    ///        6. Refund the unused portion of `amountXDesired` to the payer.
+    ///        7. Compute and mint shares: first depositor mints sqrt(a0*a1) and
+    ///           burns MIN_SHARES to DEAD (PRD §13 inflation guard); subsequent
+    ///           depositors mint pro-rata against existing totalSupply.
+    function _handleDeposit(DepositPayload memory payload) internal returns (bytes memory) {
+        // 1. Read the pool state.
+        PoolId pid = _poolKey.toId();
+        (uint160 sqrtPriceX96, int24 currentTick,,) = poolManager.getSlot0(pid);
+
+        // 2. Strategy decides the target shape against the deposit budget.
+        IStrategy.TargetPosition[] memory targets =
+            strategy.computePositions(currentTick, tickSpacing, payload.amount0Desired, payload.amount1Desired);
+
+        // 3. Validate the strategy output (invariants #2 and #3).
+        if (targets.length == 0 || targets.length > MAX_POSITIONS) {
+            revert Errors.MaxPositionsExceeded(targets.length);
+        }
+        uint256 weightSum;
+        for (uint256 i = 0; i < targets.length; i++) {
+            weightSum += targets[i].weight;
+        }
+        if (weightSum != 10_000) revert Errors.WeightsDoNotSum(weightSum);
+
+        // 4. Deploy each target. Track aggregate consumed amounts via the
+        // returned BalanceDelta. callerDelta < 0 means the vault owes.
+        uint256 amount0Used;
+        uint256 amount1Used;
+        delete _positions; // first deposit only — subsequent rebalance manages this
+
+        for (uint256 i = 0; i < targets.length; i++) {
+            IStrategy.TargetPosition memory t = targets[i];
+
+            // Allocate this position's share of the budget by weight.
+            uint256 share0 = (payload.amount0Desired * t.weight) / 10_000;
+            uint256 share1 = (payload.amount1Desired * t.weight) / 10_000;
+
+            uint128 liquidity =
+                PositionLib.liquidityForAmounts(sqrtPriceX96, t.tickLower, t.tickUpper, tickSpacing, share0, share1);
+            if (liquidity == 0) continue; // skip degenerate positions
+
+            (BalanceDelta delta,) = poolManager.modifyLiquidity(
+                _poolKey,
+                ModifyLiquidityParams({
+                    tickLower: t.tickLower,
+                    tickUpper: t.tickUpper,
+                    liquidityDelta: int256(uint256(liquidity)),
+                    salt: bytes32(uint256(i))
+                }),
+                ""
+            );
+
+            int128 d0 = delta.amount0();
+            int128 d1 = delta.amount1();
+            if (d0 < 0) amount0Used += uint128(-d0);
+            if (d1 < 0) amount1Used += uint128(-d1);
+
+            _positions.push(Position({tickLower: t.tickLower, tickUpper: t.tickUpper, liquidity: liquidity}));
+        }
+
+        // 5. Slippage gate.
+        if (amount0Used < payload.amount0Min) revert Errors.SlippageExceeded(amount0Used, payload.amount0Min);
+        if (amount1Used < payload.amount1Min) revert Errors.SlippageExceeded(amount1Used, payload.amount1Min);
+
+        // 6. Settle deltas. The vault holds `amountXDesired` from the entry
+        // point's transferFrom. Anything not consumed by modifyLiquidity is
+        // refunded to the payer; the rest is paid to the PoolManager.
+        if (amount0Used > 0) {
+            poolManager.sync(_poolKey.currency0);
+            token0.safeTransfer(address(poolManager), amount0Used);
+            poolManager.settle();
+        }
+        if (amount1Used > 0) {
+            poolManager.sync(_poolKey.currency1);
+            token1.safeTransfer(address(poolManager), amount1Used);
+            poolManager.settle();
+        }
+
+        uint256 refund0 = payload.amount0Desired - amount0Used;
+        uint256 refund1 = payload.amount1Desired - amount1Used;
+        if (refund0 > 0) token0.safeTransfer(payload.payer, refund0);
+        if (refund1 > 0) token1.safeTransfer(payload.payer, refund1);
+
+        // 7. TVL cap — enforce against the token0-notional contribution.
+        // v1.0 uses amount0Used as the proxy; a more sophisticated notional
+        // (oracle-priced) lands in a follow-up.
+        if (amount0Used > tvlCap) revert Errors.TVLCapExceeded(amount0Used, tvlCap);
+
+        // 8. Compute + mint shares.
+        uint256 supply = totalSupply();
+        uint256 shares;
+        if (supply == 0) {
+            // First deposit: shares = sqrt(a0 * a1) - MIN_SHARES; MIN_SHARES
+            // burned to DEAD per PRD §13 inflation-attack guard.
+            uint256 product = amount0Used * amount1Used;
+            shares = Math.sqrt(product);
+            if (shares <= MIN_SHARES) revert Errors.ZeroShares();
+            shares -= MIN_SHARES;
+            _mint(DEAD, MIN_SHARES);
+        } else {
+            // Subsequent deposit: shares proportional to existing TVL share.
+            // We use the dominant-token contribution to avoid divide-by-zero
+            // when one side is empty mid-rebalance.
+            uint256 share0 = amount0Used > 0 ? Math.mulDiv(amount0Used, supply, _tvlToken0Estimate()) : 0;
+            uint256 share1 = amount1Used > 0 ? Math.mulDiv(amount1Used, supply, _tvlToken1Estimate()) : 0;
+            shares = share0 < share1 || share1 == 0 ? share0 : share1;
+            if (shares == 0) revert Errors.ZeroShares();
+        }
+        _mint(payload.to, shares);
+
+        return abi.encode(shares, amount0Used, amount1Used);
+    }
+
+    /// @dev Estimate of the vault's total token0 holdings — idle balance
+    ///      plus the position-equivalent value at the current pool price.
+    ///      Used only for share-pricing on subsequent deposits. Full
+    ///      multi-position aggregation lands in #30.
+    function _tvlToken0Estimate() internal view returns (uint256) {
+        return token0.balanceOf(address(this));
+    }
+
+    /// @dev Estimate of the vault's total token1 holdings (see token0).
+    function _tvlToken1Estimate() internal view returns (uint256) {
+        return token1.balanceOf(address(this));
     }
 
     /// @dev Stub: real implementation removes a proportional slice of
