@@ -4,6 +4,7 @@ import {baseSepolia} from "viem/chains";
 import pino from "pino";
 
 import {loadConfig} from "./config.js";
+import {startHealthServer, stopHealthServer} from "./health.js";
 import {Metrics} from "./metrics.js";
 import {runPollLoop} from "./poll.js";
 import {gweiToWei} from "./submit.js";
@@ -56,6 +57,7 @@ async function main() {
   } as unknown as Parameters<typeof runPollLoop>[0]["client"];
 
   const metrics = new Metrics();
+  const healthServer = startHealthServer({port: config.HEALTH_PORT, logger, metrics});
 
   const stop = runPollLoop({
     client,
@@ -77,14 +79,28 @@ async function main() {
     logger.info({metrics: metrics.snapshot()}, "metric snapshot");
   }, METRIC_SNAPSHOT_INTERVAL_MS);
 
-  // #60 hardens this further: /health endpoint + structured shutdown
-  // semantics on both SIGTERM + SIGINT.
+  // Graceful shutdown: drain the in-flight cycle, stop the metric
+  // snapshot timer, then close the health server. SIGTERM is what
+  // platforms (Fly.io, k8s) send for orderly stops; SIGINT is Ctrl-C
+  // in dev. We treat both identically.
   await new Promise<void>((resolve) => {
-    process.on("SIGTERM", () => {
-      logger.info("SIGTERM received — draining in-flight cycle");
+    let shuttingDown = false;
+    const shutdown = async (signal: string): Promise<void> => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      logger.info({signal}, "received shutdown signal — draining");
       clearInterval(metricTimer);
-      stop().then(resolve);
-    });
+      try {
+        await stop();
+        await stopHealthServer(healthServer);
+      } catch (err) {
+        logger.error({err}, "shutdown error");
+      }
+      logger.info({metrics: metrics.snapshot()}, "shutdown complete");
+      resolve();
+    };
+    process.on("SIGTERM", () => void shutdown("SIGTERM"));
+    process.on("SIGINT", () => void shutdown("SIGINT"));
   });
 }
 

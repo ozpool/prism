@@ -1,0 +1,59 @@
+# Fly.io configuration for the PRISM keeper.
+#
+# Deploy from the repo root:
+#   fly deploy --dockerfile apps/keeper/Dockerfile --config apps/keeper/fly.toml
+#
+# Secrets (NEVER commit these — set via `fly secrets set`):
+#   - BASE_SEPOLIA_RPC_URL
+#   - KEEPER_PRIVATE_KEY
+#   - VAULT_FACTORY_ADDRESS
+#   - POOL_MANAGER_ADDRESS
+
+app = "prism-keeper"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+# Single-instance keeper. We don't want two processes racing for the same
+# nonce; submission (#58) pins the nonce per cycle so concurrent runs
+# would reprice each other into the ground.
+[deploy]
+  strategy = "immediate"
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8080
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [[services.http_checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "60s"
+    method = "get"
+    path = "/health"
+
+[env]
+  POLL_INTERVAL_MS = "30000"
+  MAX_GAS_PRICE_GWEI = "10"
+  HEALTH_PORT = "8080"
+  LOG_LEVEL = "info"
+
+# 256MB is comfortable for a single-process keeper. Bump if the cycle
+# log emits memory pressure warnings under sustained load.
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 256

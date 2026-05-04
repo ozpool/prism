@@ -13,6 +13,7 @@ const envSchema = z.object({
     .regex(/^0x[a-fA-F0-9]{40}$/, "POOL_MANAGER_ADDRESS must be a 0x-prefixed address"),
   POLL_INTERVAL_MS: z.coerce.number().int().positive().default(30_000),
   MAX_GAS_PRICE_GWEI: z.coerce.number().int().positive().default(10),
+  HEALTH_PORT: z.coerce.number().int().positive().default(8080),
   LOG_LEVEL: z
     .enum(["trace", "debug", "info", "warn", "error", "fatal"])
     .default("info"),
