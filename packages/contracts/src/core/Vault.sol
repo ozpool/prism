@@ -558,6 +558,38 @@ contract Vault is IVault, ERC20, IUnlockCallback {
         }
     }
 
+    /// @notice Spot share price for each token, scaled by 1e18.
+    /// @dev Returns `(token0_per_share, token1_per_share)` so the caller
+    ///      can compose with the oracle to render a USD price. Returns
+    ///      `(1e18, 1e18)` pre-deposit so the dApp does not divide by
+    ///      zero.
+    function sharePrice() external view returns (uint256 price0, uint256 price1) {
+        uint256 supply = totalSupply();
+        if (supply == 0) return (1e18, 1e18);
+        // Position-aware: idle + active liquidity, mirroring getTotalAmounts.
+        (uint256 t0, uint256 t1) = _totalAmountsView();
+        price0 = (t0 * 1e18) / supply;
+        price1 = (t1 * 1e18) / supply;
+    }
+
+    /// @dev Internal twin of `getTotalAmounts` so `sharePrice` doesn't
+    ///      pay the external-call overhead.
+    function _totalAmountsView() internal view returns (uint256 total0, uint256 total1) {
+        total0 = token0.balanceOf(address(this));
+        total1 = token1.balanceOf(address(this));
+        if (_positions.length == 0) return (total0, total1);
+
+        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(_poolKey.toId());
+        uint256 n = _positions.length;
+        for (uint256 i = 0; i < n; i++) {
+            Position memory p = _positions[i];
+            (uint256 a0, uint256 a1) =
+                PositionLib.amountsForLiquidity(sqrtPriceX96, p.tickLower, p.tickUpper, tickSpacing, p.liquidity);
+            total0 += a0;
+            total1 += a1;
+        }
+    }
+
     /// @inheritdoc IVault
     function poolKey() external view override returns (PoolKey memory) {
         return _poolKey;
