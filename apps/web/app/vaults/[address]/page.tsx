@@ -5,6 +5,7 @@ import {useMemo} from "react";
 import {isAddress, zeroAddress, type Address} from "viem";
 
 import {DepositForm} from "@/components/DepositForm";
+import {PrismVisual, type PrismPosition} from "@/components/PrismVisual";
 import {WithdrawForm} from "@/components/WithdrawForm";
 import {formatBps, formatUsd} from "@/lib/vault-list";
 
@@ -33,6 +34,12 @@ export default function VaultDetailPage({params}: PageProps) {
         <Metric label="APR (24h)" value={formatBps(detail.apr24hBps)} />
         <Metric label="Share price" value={formatUsd(detail.sharePriceUsd)} />
       </section>
+
+      <PrismVisual
+        positions={detail.positions}
+        currentTick={detail.currentTick}
+        tickSpacing={detail.tickSpacing}
+      />
 
       <PositionsTable positions={detail.positions} />
 
@@ -116,10 +123,7 @@ function PositionsTable({positions}: {positions: PlaceholderPosition[]}) {
   );
 }
 
-interface PlaceholderPosition {
-  tickLower: number;
-  tickUpper: number;
-  liquidity: bigint;
+interface PlaceholderPosition extends PrismPosition {
   token0: bigint;
   token1: bigint;
 }
@@ -138,6 +142,8 @@ interface PlaceholderDetail {
   apr24hBps: number;
   sharePriceUsd: bigint;
   positions: PlaceholderPosition[];
+  currentTick: number;
+  tickSpacing: number;
   token0: PlaceholderToken;
   token1: PlaceholderToken;
 }
@@ -151,7 +157,16 @@ function usePlaceholderVault(address: string): PlaceholderDetail {
       tvlUsd: 0n,
       apr24hBps: 0,
       sharePriceUsd: 1_000_000n, // 1.000000 USDC (6 decimals)
-      positions: [],
+      // Placeholder shape — three positions either side of tick 0,
+      // weighted to draw a recognisable bell. Real values land with
+      // #31 (VaultFactory) + getTotalAmounts wire-up in M2.
+      positions: [
+        {tickLower: -1200, tickUpper: -600, liquidity: 4_000_000n, token0: 0n, token1: 0n},
+        {tickLower: -600, tickUpper: 600, liquidity: 10_000_000n, token0: 0n, token1: 0n},
+        {tickLower: 600, tickUpper: 1200, liquidity: 4_000_000n, token0: 0n, token1: 0n},
+      ],
+      currentTick: 0,
+      tickSpacing: 60,
       // Token metadata is fixed for the placeholder vault; real values
       // come from the data layer once #31 (VaultFactory) lands.
       token0: {address: zeroAddress, symbol: "WETH", decimals: 18},
