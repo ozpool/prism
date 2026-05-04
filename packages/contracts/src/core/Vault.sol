@@ -335,11 +335,76 @@ contract Vault is IVault, ERC20, IUnlockCallback {
         revert Errors.UnknownOp();
     }
 
-    /// @dev Stub: real implementation removes a proportional slice of
-    ///      every position via `modifyLiquidity` with negative liquidity
-    ///      delta, takes both currencies, and transfers to `payload.to`.
-    function _handleWithdraw(WithdrawPayload memory /*payload*/ ) internal pure returns (bytes memory) {
-        revert Errors.UnknownOp();
+    /// @dev Proportional withdraw across every active position.
+    ///
+    ///      Shares were already burned by the external `withdraw` entry
+    ///      point before this callback. The pre-burn supply equals
+    ///      `totalSupply() + payload.shares` — the user's fraction of
+    ///      the vault is `payload.shares / preSupply`. We remove that
+    ///      fraction of liquidity from each position and the same
+    ///      fraction of any idle balance.
+    ///
+    ///      Per ADR-002 + invariant 6, withdraw is never pausable and
+    ///      never reverts on a healthy state. The slippage gate is the
+    ///      one revert path the user can hit.
+    function _handleWithdraw(WithdrawPayload memory payload) internal returns (bytes memory) {
+        uint256 preSupply = totalSupply() + payload.shares;
+
+        // Snapshot idle balance BEFORE removing positions so the
+        // withdrawer's idle slice is computed against pre-withdraw state.
+        uint256 idle0 = token0.balanceOf(address(this));
+        uint256 idle1 = token1.balanceOf(address(this));
+        uint256 idleTake0 = Math.mulDiv(idle0, payload.shares, preSupply);
+        uint256 idleTake1 = Math.mulDiv(idle1, payload.shares, preSupply);
+
+        // Remove the user's proportional liquidity slice from each
+        // position. Track aggregate positive deltas so we can take
+        // the right amount in one settle pass.
+        uint256 owed0;
+        uint256 owed1;
+
+        uint256 n = _positions.length;
+        for (uint256 i = 0; i < n; i++) {
+            Position storage p = _positions[i];
+            uint128 share = uint128(Math.mulDiv(uint256(p.liquidity), payload.shares, preSupply));
+            if (share == 0) continue;
+
+            (BalanceDelta delta,) = poolManager.modifyLiquidity(
+                _poolKey,
+                ModifyLiquidityParams({
+                    tickLower: p.tickLower,
+                    tickUpper: p.tickUpper,
+                    liquidityDelta: -int256(uint256(share)),
+                    salt: bytes32(uint256(i))
+                }),
+                ""
+            );
+
+            int128 d0 = delta.amount0();
+            int128 d1 = delta.amount1();
+            if (d0 > 0) owed0 += uint128(d0);
+            if (d1 > 0) owed1 += uint128(d1);
+
+            p.liquidity = p.liquidity - share;
+        }
+
+        // Take the modifyLiquidity proceeds out of PoolManager. take()
+        // shifts the positive delta into a real balance on the vault.
+        if (owed0 > 0) poolManager.take(_poolKey.currency0, address(this), owed0);
+        if (owed1 > 0) poolManager.take(_poolKey.currency1, address(this), owed1);
+
+        uint256 amount0 = owed0 + idleTake0;
+        uint256 amount1 = owed1 + idleTake1;
+
+        // Slippage gate — the only user-reachable revert in withdraw.
+        if (amount0 < payload.amount0Min) revert Errors.SlippageExceeded(amount0, payload.amount0Min);
+        if (amount1 < payload.amount1Min) revert Errors.SlippageExceeded(amount1, payload.amount1Min);
+
+        // Forward the recovered amounts to the recipient.
+        if (amount0 > 0) token0.safeTransfer(payload.to, amount0);
+        if (amount1 > 0) token1.safeTransfer(payload.to, amount1);
+
+        return abi.encode(amount0, amount1);
     }
 
     /// @dev Remove-all → recompute shape → redeploy → settle → mint
