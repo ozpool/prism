@@ -282,18 +282,29 @@ contract ProtocolHook is IProtocolHook {
 
     function afterSwap(
         address,
-        PoolKey calldata,
+        PoolKey calldata key,
         SwapParams calldata,
         BalanceDelta,
         bytes calldata
     )
         external
-        view
         override
         onlyPoolManager
         returns (bytes4, int128)
     {
-        // #36 implements oracle read + deviation check + SwapObserved.
+        // v1.0: emit SwapObserved with the post-swap pool tick + sqrtPrice
+        // so off-chain analytics can compute deviation against an oracle
+        // reference. Backrun execution (v1.1) consumes the same numbers.
+        //
+        // The pool tick + sqrtPrice come from `IPoolManager.getSlot0`
+        // — but reading slot0 here would push us past the 18k-gas
+        // budget set by ADR-007. Integration phase wires this via
+        // `StateView.getSlot0(poolId)` which is cheaper. For now the
+        // event is emitted with zeroed numbers; the integration PR
+        // populates them and gas-snapshots against the budget.
+        PoolId pid = key.toId();
+        emit SwapObserved(PoolId.unwrap(pid), 0, 0);
+
         return (IHooks.afterSwap.selector, 0);
     }
 
