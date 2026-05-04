@@ -4,11 +4,12 @@ import type {Logger} from "pino";
 import {strategyAbi, vaultAbi, vaultFactoryAbi} from "./abi.js";
 import {readSlot0, toPoolId} from "./pool.js";
 import {gatedSimulate, type SimulateClient, type SimulateResult} from "./simulate.js";
+import {submitRebalance, type SubmitClient, type SubmitResult} from "./submit.js";
 
 /// Minimal slice of viem's PublicClient that the poll loop needs. Typing
 /// as a structural slice avoids cross-version PublicClient incompatibilities
 /// when the keeper, shared, and web packages each resolve viem differently.
-export interface ReadClient extends SimulateClient {
+export interface ReadClient extends SimulateClient, SubmitClient {
   readContract: (args: {
     address: Address;
     abi: readonly unknown[];
@@ -23,17 +24,24 @@ export interface VaultEvaluation {
   currentTick: number;
   shouldRebalance: boolean;
   /// Set when shouldRebalance is true and we ran the eth_call sim gate.
-  /// Undefined when the sim was skipped (e.g., shouldRebalance was false).
   simulation?: SimulateResult;
+  /// Set when sim passed and the keeper submitted (or attempted to).
+  submission?: SubmitResult;
 }
 
 export interface PollDeps {
   client: ReadClient;
   factory: Address;
   poolManager: Address;
-  /// Keeper account used as the `from` for sim eth_call. Submission
-  /// reuses the same account in #58.
+  /// Keeper account used as the `from` for sim eth_call AND as the
+  /// signer for submission.
   account: Address;
+  /// Hard ceiling on maxFeePerGas — keeper refuses to submit above this.
+  maxFeePerGasCap: bigint;
+  /// Per-attempt timeout before a stuck tx is repriced.
+  txAttemptTimeoutMs: number;
+  /// Maximum reprice retries.
+  maxSubmitAttempts: number;
   logger: Logger;
 }
 
@@ -47,10 +55,10 @@ export interface PollDeps {
 /// Errors per vault are caught + logged so a single bad vault does not
 /// abort the cycle. The cycle itself does not throw.
 export async function evaluateVaults(deps: PollDeps): Promise<VaultEvaluation[]> {
-  const {client, factory, poolManager, account, logger} = deps;
+  const {logger} = deps;
 
-  const vaults = (await client.readContract({
-    address: factory,
+  const vaults = (await deps.client.readContract({
+    address: deps.factory,
     abi: vaultFactoryAbi,
     functionName: "allVaults",
   })) as readonly Address[];
@@ -58,7 +66,7 @@ export async function evaluateVaults(deps: PollDeps): Promise<VaultEvaluation[]>
   const results: VaultEvaluation[] = [];
   for (const vault of vaults) {
     try {
-      const evaluation = await evaluateVault({client, poolManager, account, logger, vault});
+      const evaluation = await evaluateVault({...deps, vault});
       results.push(evaluation);
     } catch (err) {
       logger.warn({vault, err: errMsg(err)}, "vault evaluation failed");
@@ -67,11 +75,7 @@ export async function evaluateVaults(deps: PollDeps): Promise<VaultEvaluation[]>
   return results;
 }
 
-interface EvaluateOne {
-  client: ReadClient;
-  poolManager: Address;
-  account: Address;
-  logger: Logger;
+interface EvaluateOne extends PollDeps {
   vault: Address;
 }
 
@@ -83,7 +87,9 @@ interface PoolKeyOnChain {
   hooks: Address;
 }
 
-async function evaluateVault({client, poolManager, account, logger, vault}: EvaluateOne): Promise<VaultEvaluation> {
+async function evaluateVault(deps: EvaluateOne): Promise<VaultEvaluation> {
+  const {client, poolManager, account, vault, logger} = deps;
+
   // Pull pool key + strategy + last-rebalance bookkeeping in parallel —
   // four reads against the same vault contract.
   const [poolKey, strategy, lastTick, lastTimestamp] = await Promise.all([
@@ -116,13 +122,34 @@ async function evaluateVault({client, poolManager, account, logger, vault}: Eval
 
   logger.info({vault, currentTick, lastTick, lastTimestamp: lastTimestamp.toString()}, "vault due for rebalance");
 
-  // #57 sim gate: run eth_call against the pending block before #58
-  // submits. A reverting simulation signals the keeper would burn gas
-  // without landing — defer to the next cycle so the bonus invariant
-  // (ADR-007 §rebalance) holds.
+  // Sim gate (#57): run eth_call against pending before submission.
   const simulation = await gatedSimulate({client, vault, account, logger});
+  if (!simulation.ok) {
+    return {vault, poolId, currentTick, shouldRebalance, simulation};
+  }
 
-  return {vault, poolId, currentTick, shouldRebalance, simulation};
+  // Submission (#58): writeContract + confirmation wait + reprice on stuck.
+  const submission = await submitRebalance({
+    client,
+    account,
+    vault,
+    logger,
+    maxFeePerGasCap: deps.maxFeePerGasCap,
+    attemptTimeoutMs: deps.txAttemptTimeoutMs,
+    maxAttempts: deps.maxSubmitAttempts,
+  });
+  if (submission.status === "confirmed") {
+    logger.info(
+      {vault, hash: submission.hash, attempts: submission.attempts, gasUsed: submission.gasUsed.toString()},
+      "rebalance landed",
+    );
+  } else if (submission.status === "skipped") {
+    logger.info({vault, reason: submission.reason}, "rebalance submission skipped");
+  } else {
+    logger.warn({vault, reason: submission.reason, attempts: submission.attempts}, "rebalance submission failed");
+  }
+
+  return {vault, poolId, currentTick, shouldRebalance, simulation, submission};
 }
 
 /// Vault scaffold (#26) does not yet expose lastRebalanceTick /
@@ -163,11 +190,13 @@ export function runPollLoop(deps: PollDeps & {intervalMs: number}): () => Promis
       const evaluations = await evaluateVaults({...deps, logger: cycleLogger});
       const dueCount = evaluations.filter((e) => e.shouldRebalance).length;
       const submittableCount = evaluations.filter((e) => e.simulation?.ok === true).length;
+      const confirmedCount = evaluations.filter((e) => e.submission?.status === "confirmed").length;
       cycleLogger.info(
         {
           vaultCount: evaluations.length,
           dueCount,
           submittableCount,
+          confirmedCount,
           ms: Date.now() - start,
         },
         "poll cycle complete",
