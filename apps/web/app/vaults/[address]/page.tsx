@@ -5,6 +5,7 @@ import {useMemo} from "react";
 import {isAddress, zeroAddress, type Address} from "viem";
 
 import {DepositForm} from "@/components/DepositForm";
+import {WithdrawForm} from "@/components/WithdrawForm";
 import {formatBps, formatUsd} from "@/lib/vault-list";
 
 interface PageProps {
@@ -35,11 +36,20 @@ export default function VaultDetailPage({params}: PageProps) {
 
       <PositionsTable positions={detail.positions} />
 
-      <DepositForm
-        vaultAddress={detail.address as Address}
-        token0={detail.token0}
-        token1={detail.token1}
-      />
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <DepositForm
+          vaultAddress={detail.address as Address}
+          token0={detail.token0}
+          token1={detail.token1}
+        />
+        <WithdrawForm
+          vaultAddress={detail.address as Address}
+          token0Symbol={detail.token0.symbol}
+          token0Decimals={detail.token0.decimals}
+          token1Symbol={detail.token1.symbol}
+          token1Decimals={detail.token1.decimals}
+        />
+      </div>
     </article>
   );
 }
