@@ -4,6 +4,7 @@ import {notFound} from "next/navigation";
 import {useMemo} from "react";
 import {isAddress} from "viem";
 
+import {PrismVisual, type PrismPosition} from "@/components/PrismVisual";
 import {formatBps, formatUsd} from "@/lib/vault-list";
 
 interface PageProps {
@@ -31,6 +32,12 @@ export default function VaultDetailPage({params}: PageProps) {
         <Metric label="APR (24h)" value={formatBps(detail.apr24hBps)} />
         <Metric label="Share price" value={formatUsd(detail.sharePriceUsd)} />
       </section>
+
+      <PrismVisual
+        positions={detail.positions}
+        currentTick={detail.currentTick}
+        tickSpacing={detail.tickSpacing}
+      />
 
       <PositionsTable positions={detail.positions} />
 
@@ -114,10 +121,7 @@ function DepositPanel({placeholder}: {placeholder: boolean}) {
   );
 }
 
-interface PlaceholderPosition {
-  tickLower: number;
-  tickUpper: number;
-  liquidity: bigint;
+interface PlaceholderPosition extends PrismPosition {
   token0: bigint;
   token1: bigint;
 }
@@ -130,6 +134,8 @@ interface PlaceholderDetail {
   apr24hBps: number;
   sharePriceUsd: bigint;
   positions: PlaceholderPosition[];
+  currentTick: number;
+  tickSpacing: number;
 }
 
 function usePlaceholderVault(address: string): PlaceholderDetail {
@@ -141,7 +147,16 @@ function usePlaceholderVault(address: string): PlaceholderDetail {
       tvlUsd: 0n,
       apr24hBps: 0,
       sharePriceUsd: 1_000_000n, // 1.000000 USDC (6 decimals)
-      positions: [],
+      // Placeholder shape — three positions either side of tick 0,
+      // weighted to draw a recognisable bell. Real values land with
+      // #31 (VaultFactory) + getTotalAmounts wire-up in M2.
+      positions: [
+        {tickLower: -1200, tickUpper: -600, liquidity: 4_000_000n, token0: 0n, token1: 0n},
+        {tickLower: -600, tickUpper: 600, liquidity: 10_000_000n, token0: 0n, token1: 0n},
+        {tickLower: 600, tickUpper: 1200, liquidity: 4_000_000n, token0: 0n, token1: 0n},
+      ],
+      currentTick: 0,
+      tickSpacing: 60,
     }),
     [address],
   );
