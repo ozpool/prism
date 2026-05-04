@@ -248,6 +248,52 @@ contract ProtocolHookTest is Test {
         assertEq(hook.currentFee(bytes32(uint256(1))), 3000);
     }
 
+    // -------------------------------------------------------------------------
+    // #40 — additional fuzz coverage
+    // -------------------------------------------------------------------------
+
+    /// @dev onlyPoolManager rejects every non-pool-manager caller. Fuzz
+    ///      across random sender addresses to confirm the modifier never
+    ///      lets a non-PM through.
+    function testFuzz_beforeSwap_rejectsAnyNonPoolManager(address caller) public {
+        vm.assume(caller != POOL_MANAGER);
+        PoolKey memory key = _emptyKey();
+        SwapParams memory params;
+
+        vm.prank(caller);
+        vm.expectRevert(Errors.OnlyPoolManager.selector);
+        hook.beforeSwap(address(this), key, params, "");
+    }
+
+    function testFuzz_afterSwap_rejectsAnyNonPoolManager(address caller) public {
+        vm.assume(caller != POOL_MANAGER);
+        PoolKey memory key = _emptyKey();
+        SwapParams memory params;
+
+        vm.prank(caller);
+        vm.expectRevert(Errors.OnlyPoolManager.selector);
+        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), "");
+    }
+
+    function testFuzz_registerVault_rejectsAnyNonFactory(address caller) public {
+        vm.assume(caller != FACTORY);
+        vm.prank(caller);
+        vm.expectRevert(Errors.OnlyOwner.selector);
+        hook.registerVault(address(0x1234));
+    }
+
+    /// @dev Permission bits invariant: across the deployed hook,
+    ///      bits 6/7/8/10 are set and all others are zero.
+    function test_addressBits_onlyEnabledFlagsSet() public view {
+        uint160 addrBits = uint160(address(hook)) & 0x3FFF;
+        // Set bits: 6, 7, 8, 10 → 0x40 | 0x80 | 0x100 | 0x400 = 0x5C0
+        assertEq(addrBits, 0x05C0);
+        // Confirm bits 0..5, 9, 11..13 are all clear.
+        assertEq(addrBits & 0x3F, 0);
+        assertEq(addrBits & 0x200, 0);
+        assertEq(addrBits & 0x3800, 0);
+    }
+
     function test_mevProfits_returnsZeroStub() public view {
         (uint256 a, uint256 b) = hook.mevProfits(address(0x1234));
         assertEq(a, 0);
