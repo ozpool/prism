@@ -1,0 +1,73 @@
+/*
+ * PRISM brand tokens.
+ *
+ * The palette is built around the metaphor of a prism refracting white light
+ * into its spectrum — a violet → rose arc on a deep, warm-tinted dark canvas.
+ * Tokens are exposed as CSS custom properties so both Tailwind utilities and
+ * raw CSS can consume them; Tailwind's `theme.extend` references these vars.
+ */
+
+:root {
+  /* Surfaces — deep, warm-cooled neutrals. */
+  --color-canvas: 12 10 20;            /*  #0c0a14  app background           */
+  --color-surface: 21 18 31;           /*  #15121f  cards, panels            */
+  --color-surface-raised: 30 26 44;    /*  #1e1a2c  hover, popovers          */
+  --color-border: 34 29 51;            /*  #221d33  hairline borders         */
+  --color-border-strong: 53 45 78;     /*  #352d4e  focused borders          */
+
+  /* Text — warm cream descending to muted lavender. */
+  --color-text: 235 229 213;           /*  #ebe5d5  primary copy             */
+  --color-text-muted: 152 144 176;     /*  #9890b0  secondary copy           */
+  --color-text-faint: 105 99 130;      /*  #696382  hints, disabled labels   */
+
+  /* Spectrum — six stops, ordered violet → rose. */
+  --color-spectrum-violet: 124 92 255; /*  #7c5cff                            */
+  --color-spectrum-indigo: 92 138 255; /*  #5c8aff                            */
+  --color-spectrum-teal:   62 220 255; /*  #3edcff                            */
+  --color-spectrum-mint:   62 255 155; /*  #3eff9b                            */
+  --color-spectrum-amber:  255 209 102;/*  #ffd166                            */
+  --color-spectrum-rose:   255  92 138;/*  #ff5c8a                            */
+
+  /* Semantic — single source of meaning, mapped to the spectrum. */
+  --color-accent: var(--color-spectrum-violet);
+  --color-success: var(--color-spectrum-mint);
+  --color-warning: var(--color-spectrum-amber);
+  --color-danger: var(--color-spectrum-rose);
+
+  /* Type — system stack first to avoid web-font flash; mono for addresses. */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Monaco, "Cascadia Code",
+    "Roboto Mono", "Courier New", monospace;
+
+  /* Type scale — Tailwind-aligned with a `display` step for hero numbers. */
+  --text-xs: 0.75rem;       /* 12px */
+  --text-sm: 0.875rem;      /* 14px */
+  --text-base: 1rem;        /* 16px */
+  --text-lg: 1.125rem;      /* 18px */
+  --text-xl: 1.25rem;       /* 20px */
+  --text-2xl: 1.5rem;       /* 24px */
+  --text-3xl: 1.875rem;     /* 30px */
+  --text-display: 2.5rem;   /* 40px — vault TVL / yield numbers */
+
+  /* Radii. */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-2xl: 24px;
+  --radius-pill: 9999px;
+
+  /* Shadows — flat by default, glowing only on accent state. */
+  --shadow-card: 0 1px 0 rgb(255 255 255 / 0.02), 0 8px 24px rgb(0 0 0 / 0.32);
+  --shadow-popover: 0 12px 40px rgb(0 0 0 / 0.45);
+  --shadow-glow-violet: 0 0 32px rgb(124 92 255 / 0.35);
+  --shadow-glow-mint:   0 0 32px rgb(62 255 155 / 0.30);
+  --shadow-glow-rose:   0 0 32px rgb(255 92 138 / 0.30);
+
+  /* Motion — kept minimal; UI is finance-sober, not playful. */
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+  --motion-slow: 360ms;
+  --easing-standard: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
