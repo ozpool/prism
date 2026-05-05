@@ -32,5 +32,9 @@ base_sepolia = "${BASE_SEPOLIA_RPC_URL}"
 base = "${BASE_RPC_URL}"
 
 [etherscan]
-base_sepolia = { key = "${BASESCAN_API_KEY}", url = "https://api-sepolia.basescan.org/api", chain = 84532 }
-base = { key = "${BASESCAN_API_KEY}", url = "https://api.basescan.org/api", chain = 8453 }
+# Etherscan V2 unified API (one endpoint, chainid query param). The
+# legacy basescan.org/api endpoints were deprecated in 2025 — see
+# https://docs.etherscan.io/v2-migration. The same API key works for
+# every chain Etherscan supports.
+base_sepolia = { key = "${BASESCAN_API_KEY}", url = "https://api.etherscan.io/v2/api?chainid=84532", chain = 84532 }
+base = { key = "${BASESCAN_API_KEY}", url = "https://api.etherscan.io/v2/api?chainid=8453", chain = 8453 }
