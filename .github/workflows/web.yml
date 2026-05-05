@@ -1,0 +1,119 @@
+name: web
+
+on:
+  pull_request:
+    paths:
+      - "apps/web/**"
+      - "packages/shared/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/web.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/web/**"
+      - "packages/shared/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/web.yml"
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "20"
+  PNPM_VERSION: "10.18.0"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # -------------------------------------------------------------------------
+  # typecheck + lint + build
+  #
+  # Single job — these are fast (<60s combined) and share the same
+  # node_modules, so paying the install cost once is cheaper than
+  # parallelising into three jobs each with its own install.
+  #
+  # Playwright lives in a separate job because it needs the production
+  # build artefact and a browser install.
+  # -------------------------------------------------------------------------
+  typecheck-lint-build:
+    name: typecheck · lint · build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck shared
+        run: pnpm --filter @prism/shared typecheck
+
+      - name: Typecheck web
+        run: pnpm --filter @prism/web typecheck
+
+      - name: Lint web
+        run: pnpm --filter @prism/web lint
+
+      - name: Build web
+        run: pnpm --filter @prism/web build
+        env:
+          # Required by RainbowKit/wagmi for build-time WC project init.
+          # Use a placeholder; tests / Playwright run with real values.
+          NEXT_PUBLIC_WC_PROJECT_ID: PRISM_CI_PLACEHOLDER
+
+  # -------------------------------------------------------------------------
+  # Playwright E2E
+  #
+  # Issue #67 (happy path) and #68 (error paths) populate the spec
+  # files; until those land, this job runs `playwright test` against an
+  # empty suite which exits 0. Keeping the job in CI now means
+  # spec-adding PRs don't have to wire CI in the same change.
+  # -------------------------------------------------------------------------
+  playwright:
+    name: playwright e2e
+    runs-on: ubuntu-latest
+    needs: typecheck-lint-build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run Playwright (skipped until #67 lands)
+        run: |
+          if [ -d "apps/web/tests-e2e" ]; then
+            pnpm --filter @prism/web exec playwright install --with-deps chromium
+            pnpm --filter @prism/web exec playwright test
+          else
+            echo "No Playwright suite yet — see #67."
+          fi
