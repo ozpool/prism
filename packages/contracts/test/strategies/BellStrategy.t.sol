@@ -159,5 +159,117 @@ contract BellStrategyTest is Test {
 
     function test_constants() public view {
         assertEq(strat.N_POSITIONS(), 7);
+        assertEq(strat.TICK_DRIFT_THRESHOLD(), 240);
+        assertEq(strat.TIME_THRESHOLD(), 6 hours);
+        assertEq(strat.LIVENESS_FALLBACK(), 24 hours);
+    }
+
+    // -------------------------------------------------------------------------
+    // shouldRebalance — three triggers
+    // -------------------------------------------------------------------------
+
+    function test_shouldRebalance_falseWhenAllQuiet() public {
+        vm.warp(1_700_000_000);
+        // Same tick, just rebalanced.
+        assertFalse(strat.shouldRebalance(0, 0, block.timestamp));
+    }
+
+    function test_shouldRebalance_firesOnTickDrift() public {
+        vm.warp(1_700_000_000);
+        // Drift = TICK_DRIFT_THRESHOLD → fires.
+        assertTrue(strat.shouldRebalance(240, 0, block.timestamp));
+        // Negative-direction drift symmetric.
+        assertTrue(strat.shouldRebalance(-240, 0, block.timestamp));
+        // Below threshold → no fire.
+        assertFalse(strat.shouldRebalance(239, 0, block.timestamp));
+    }
+
+    function test_shouldRebalance_firesOnTimeThreshold() public {
+        uint256 last = 1_700_000_000;
+        vm.warp(last + 6 hours);
+        assertTrue(strat.shouldRebalance(0, 0, last));
+
+        vm.warp(last + 6 hours - 1);
+        assertFalse(strat.shouldRebalance(0, 0, last));
+    }
+
+    function test_shouldRebalance_firesOnLivenessFallback() public {
+        uint256 last = 1_700_000_000;
+        vm.warp(last + 24 hours);
+        // Even with zero tick drift and time-threshold-already-elapsed,
+        // the 24h fallback is the strict-largest guarantee.
+        assertTrue(strat.shouldRebalance(0, 0, last));
+    }
+
+    function test_shouldRebalance_independentTriggers() public {
+        uint256 last = 1_700_000_000;
+        vm.warp(last + 1);
+
+        // Drift only.
+        assertTrue(strat.shouldRebalance(500, 0, last));
+
+        // Time only.
+        vm.warp(last + 6 hours);
+        assertTrue(strat.shouldRebalance(0, 0, last));
+    }
+
+    // -------------------------------------------------------------------------
+    // #39 — additional fuzz invariants
+    // -------------------------------------------------------------------------
+
+    /// @dev MAX_POSITIONS bound: returned positions never exceed the
+    ///      vault's hardcoded cap (invariant #3).
+    function testFuzz_neverExceedsMaxPositions(int24 tick, int8 spacingFactor) public view {
+        int24 spacing = int24(uint24(uint8(spacingFactor) | 1));
+        if (spacing <= 0) spacing = 1;
+        vm.assume(tick > -200_000 && tick < 200_000);
+
+        IStrategy.TargetPosition[] memory ps = strat.computePositions(tick, spacing, 1, 1);
+        assertLe(ps.length, 7); // Vault.MAX_POSITIONS
+    }
+
+    /// @dev Tick-range bounds: every returned position has tickLower
+    ///      strictly less than tickUpper.
+    function testFuzz_tickRangeWellOrdered(int24 tick, int8 spacingFactor) public view {
+        int24 spacing = int24(uint24(uint8(spacingFactor) | 1));
+        if (spacing <= 0) spacing = 1;
+        vm.assume(tick > -200_000 && tick < 200_000);
+
+        IStrategy.TargetPosition[] memory ps = strat.computePositions(tick, spacing, 1, 1);
+        for (uint256 i = 0; i < ps.length; i++) {
+            assertLt(ps[i].tickLower, ps[i].tickUpper);
+        }
+    }
+
+    /// @dev Tick alignment: every returned tick is divisible by spacing.
+    function testFuzz_ticksAlignedToSpacing(int24 tick, int8 spacingFactor) public view {
+        int24 spacing = int24(uint24(uint8(spacingFactor) | 1));
+        if (spacing <= 0) spacing = 1;
+        vm.assume(tick > -200_000 && tick < 200_000);
+
+        IStrategy.TargetPosition[] memory ps = strat.computePositions(tick, spacing, 1, 1);
+        for (uint256 i = 0; i < ps.length; i++) {
+            assertEq(int256(ps[i].tickLower) % int256(spacing), 0);
+            assertEq(int256(ps[i].tickUpper) % int256(spacing), 0);
+        }
+    }
+
+    /// @dev shouldRebalance is monotonic in time: once it returns true
+    ///      for a given lastTimestamp, it stays true for any later
+    ///      block.timestamp at the same drift.
+    function testFuzz_shouldRebalanceMonotonicInTime(uint64 lastTs, uint64 dt) public {
+        vm.assume(lastTs > 0 && lastTs < type(uint32).max);
+        vm.assume(dt > 0 && dt < 365 days);
+
+        // Pick a calm tick (drift = 0). Time alone determines fire.
+        vm.warp(uint256(lastTs) + uint256(dt));
+
+        bool firstResult = strat.shouldRebalance(0, 0, lastTs);
+
+        // Warp further forward — should never flip from true → false.
+        vm.warp(uint256(lastTs) + uint256(dt) + 1);
+        bool secondResult = strat.shouldRebalance(0, 0, lastTs);
+
+        if (firstResult) assertTrue(secondResult);
     }
 }
