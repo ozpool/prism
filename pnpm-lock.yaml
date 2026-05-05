@@ -17,6 +17,9 @@ importers:
       turbo:
         specifier: ^2.3.3
         version: 2.9.6
+      viem:
+        specifier: ^2.48.4
+        version: 2.48.4(bufferutil@4.1.0)(typescript@5.6.3)(utf-8-validate@5.0.10)(zod@4.3.6)
 
   apps/keeper:
     dependencies:
