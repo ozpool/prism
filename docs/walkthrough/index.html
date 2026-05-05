@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PRISM — Product Walkthrough</title>
+    <style>
+      :root {
+        --bg: #0c0a14;
+        --surface: #15121f;
+        --surface-raised: #1c1929;
+        --border: #2a2440;
+        --border-strong: #352d4e;
+        --text: #ebe5d5;
+        --text-muted: #9890b0;
+        --text-faint: #696382;
+        --violet: #7c4cff;
+        --arc: #5dd6c4;
+        --pink: #f08bb6;
+        --danger: #ff6677;
+        --max: 1100px;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        line-height: 1.6;
+      }
+      a { color: var(--arc); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      header.hero {
+        max-width: var(--max);
+        margin: 0 auto;
+        padding: 64px 32px 24px;
+      }
+      header.hero .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        color: var(--arc);
+        border: 1px solid color-mix(in srgb, var(--arc) 40%, transparent);
+        background: color-mix(in srgb, var(--arc) 10%, transparent);
+        padding: 4px 10px;
+        border-radius: 999px;
+        margin-bottom: 16px;
+      }
+      header.hero .badge::before {
+        content: "";
+        width: 6px; height: 6px; border-radius: 50%; background: var(--arc);
+      }
+      header.hero h1 {
+        font-size: 48px;
+        margin: 0 0 12px;
+        background: linear-gradient(90deg, var(--violet), var(--arc));
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+      }
+      header.hero p {
+        max-width: 720px;
+        font-size: 18px;
+        color: var(--text-muted);
+      }
+
+      nav.toc {
+        max-width: var(--max);
+        margin: 0 auto;
+        padding: 0 32px 32px;
+      }
+      nav.toc ol {
+        list-style: none;
+        padding: 0;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: 8px;
+      }
+      nav.toc li {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px 14px;
+        font-size: 14px;
+      }
+      nav.toc li a { color: var(--text); }
+      nav.toc li span { color: var(--text-faint); margin-right: 8px; font-variant-numeric: tabular-nums; }
+
+      main { max-width: var(--max); margin: 0 auto; padding: 0 32px 96px; }
+      section { padding: 32px 0; border-top: 1px solid var(--border); }
+      section h2 {
+        font-size: 28px;
+        margin: 0 0 8px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+      section h3 {
+        font-size: 18px;
+        margin: 24px 0 8px;
+        color: var(--text);
+      }
+      section p { color: var(--text-muted); margin: 8px 0 16px; }
+      section li { color: var(--text-muted); }
+
+      figure {
+        margin: 16px 0 24px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 12px;
+      }
+      figure img {
+        width: 100%;
+        height: auto;
+        border-radius: 8px;
+        display: block;
+        background: var(--bg);
+      }
+      figure.mobile {
+        max-width: 480px;
+        margin-left: auto;
+        margin-right: auto;
+      }
+      figcaption {
+        margin-top: 10px;
+        color: var(--text-faint);
+        font-size: 13px;
+      }
+
+      .pill {
+        display: inline-block;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding: 2px 8px;
+        border-radius: 999px;
+        border: 1px solid var(--border-strong);
+        color: var(--text-muted);
+        margin-right: 6px;
+      }
+      .pill.live { color: var(--arc); border-color: color-mix(in srgb, var(--arc) 40%, transparent); }
+      .pill.next { color: var(--pink); border-color: color-mix(in srgb, var(--pink) 40%, transparent); }
+      .pill.future { color: var(--violet); border-color: color-mix(in srgb, var(--violet) 40%, transparent); }
+
+      .grid-2 {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: 1fr 1fr;
+      }
+      @media (max-width: 720px) {
+        .grid-2 { grid-template-columns: 1fr; }
+        header.hero h1 { font-size: 32px; }
+      }
+
+      code {
+        background: var(--surface-raised);
+        padding: 1px 6px;
+        border-radius: 4px;
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        font-size: 0.9em;
+        color: var(--arc);
+      }
+
+      .callout {
+        margin: 16px 0;
+        padding: 14px 16px;
+        background: var(--surface);
+        border: 1px solid var(--border-strong);
+        border-left: 3px solid var(--arc);
+        border-radius: 8px;
+        color: var(--text-muted);
+        font-size: 14px;
+      }
+      .callout strong { color: var(--text); }
+
+      footer {
+        max-width: var(--max);
+        margin: 0 auto;
+        padding: 32px;
+        color: var(--text-faint);
+        font-size: 13px;
+        text-align: center;
+        border-top: 1px solid var(--border);
+      }
+    </style>
+  </head>
+  <body>
+    <header class="hero">
+      <span class="badge">PRISM v0.0.0 · Base Sepolia testnet</span>
+      <h1>How PRISM behaves</h1>
+      <p>
+        End-to-end product walkthrough. Each section shows what users see, what they can do, and what is happening underneath. Screenshots are captured live from the working dApp at <code>apps/web</code>.
+      </p>
+    </header>
+
+    <nav class="toc" aria-label="Contents">
+      <ol>
+        <li><span>01</span><a href="#what">What is PRISM?</a></li>
+        <li><span>02</span><a href="#shell">App shell &amp; navigation</a></li>
+        <li><span>03</span><a href="#home">Landing page</a></li>
+        <li><span>04</span><a href="#list">Browsing vaults</a></li>
+        <li><span>05</span><a href="#detail">Vault detail</a></li>
+        <li><span>06</span><a href="#prism-visual">PrismVisual chart</a></li>
+        <li><span>07</span><a href="#deposit">Depositing liquidity</a></li>
+        <li><span>08</span><a href="#advanced">Advanced flows</a></li>
+        <li><span>09</span><a href="#errors">Error states</a></li>
+        <li><span>10</span><a href="#mobile">Mobile experience</a></li>
+        <li><span>11</span><a href="#status">What's live vs. coming</a></li>
+      </ol>
+    </nav>
+
+    <main>
+      <section id="what">
+        <h2>01 · What is PRISM?</h2>
+        <p>
+          PRISM is a permissionless automated liquidity manager (ALM) on Uniswap V4. A user makes <strong>one</strong> deposit of a token pair; the protocol refracts that deposit into <strong>multiple concentrated tick-range positions</strong> shaped by a strategy contract (e.g. a bell curve around the current price). When the price drifts or a time threshold elapses, an off-chain keeper triggers a rebalance that re-deploys the positions around the new center — and the V4 hook captures arbitrage deltas at every swap, routing the value back to LPs.
+        </p>
+        <p>
+          From a user perspective there are three primary verbs: <strong>browse vaults</strong>, <strong>deposit</strong> into one, <strong>withdraw</strong>. Everything else is automated.
+        </p>
+      </section>
+
+      <section id="shell">
+        <h2>02 · App shell &amp; navigation</h2>
+        <p>
+          Every page is rendered inside a consistent shell: a header with the PRISM mark and primary navigation (<em>Vaults</em>, <em>Rebalances</em>, <em>Docs</em>), a wallet-connect CTA on the right, and a footer that pins the network/version + license info.
+        </p>
+        <ul>
+          <li><strong>Header</strong> stays fixed across navigation so the wallet button is always one click away.</li>
+          <li><strong>Footer</strong> calls out the testnet status: <em>"Base Sepolia testnet only. Mainnet release gated on M5 audit."</em></li>
+          <li><strong>Connect Wallet</strong> opens RainbowKit; supports MetaMask, WalletConnect, Coinbase Wallet, and any injected EIP-1193 provider.</li>
+        </ul>
+      </section>
+
+      <section id="home">
+        <h2>03 · Landing page</h2>
+        <p>
+          The landing page sets context: testnet badge, one-line product pitch, and three feature cards that telegraph what the protocol does (Vaults, Rebalances, MEV-funded). It is the only route that is fully readable without a wallet connected.
+        </p>
+        <figure>
+          <img src="screenshots/01-home-desktop.png" alt="PRISM landing page on desktop" />
+          <figcaption>Landing page (desktop). Three feature cards explain the value proposition. The CTA is the persistent wallet button in the header.</figcaption>
+        </figure>
+      </section>
+
+      <section id="list">
+        <h2>04 · Browsing vaults</h2>
+        <p>
+          The <code>/vaults</code> route is the core discovery surface. The list is implemented as a discriminated union over four states — <em>loading</em>, <em>empty</em>, <em>error</em>, <em>active</em> — so every state is handled at the type level and rendered to spec.
+        </p>
+
+        <h3><span class="pill live">Live now</span>Loading state</h3>
+        <p>While the vault registry is being read, the page renders six skeleton cards so the layout never collapses or flashes.</p>
+        <figure>
+          <img src="screenshots/03-vaults-loading.png" alt="Vaults list showing skeleton placeholders" />
+          <figcaption>Skeleton cards — six tiles in a 3-column grid, animated to indicate work in progress.</figcaption>
+        </figure>
+
+        <h3><span class="pill live">Live now</span>Empty state</h3>
+        <p>When no vaults exist (the testnet today, before the first deploy), users see a clear "No vaults yet" panel with links to the GitHub repo and the PRD so they can read up while waiting.</p>
+        <figure>
+          <img src="screenshots/04-vaults-empty.png" alt="Empty vaults state" />
+          <figcaption>Empty state. Communicates what's coming and links to project docs instead of leaving a blank page.</figcaption>
+        </figure>
+
+        <h3><span class="pill next">Cohort 1</span>Active state</h3>
+        <p>Once vaults are deployed, each card shows the pair name, fee tier, TVL, 24-hour APR, and current share price. The whole card is clickable into the vault detail page.</p>
+        <figure>
+          <img src="screenshots/05-vaults-active.png" alt="Three vault cards in the active state" />
+          <figcaption>Three vaults shown side by side with mock data: ETH/USDC, WBTC/USDC, DAI/USDC. Real numbers come from per-vault on-chain reads.</figcaption>
+        </figure>
+      </section>
+
+      <section id="detail">
+        <h2>05 · Vault detail</h2>
+        <p>
+          The vault detail page (<code>/vaults/[address]</code>) is the densest view in the app. It packs four conceptual blocks in one scroll:
+        </p>
+        <ol>
+          <li><strong>Header</strong> — pair name, version pill, full vault address (copyable).</li>
+          <li><strong>Stat cards</strong> — TVL, 24h APR, share price.</li>
+          <li><strong>Prism chart</strong> — a custom SVG visualization of the current tick-range distribution (more on this in §06).</li>
+          <li><strong>Positions table</strong> — every active tick-range position with its liquidity and token balances.</li>
+          <li><strong>Deposit form</strong> — paired amount inputs, slippage selector, transaction state machine.</li>
+        </ol>
+        <figure>
+          <img src="screenshots/06-vault-detail.png" alt="Full vault detail page" />
+          <figcaption>Vault detail (desktop). All four blocks visible in one scroll on a 1280×800 viewport.</figcaption>
+        </figure>
+      </section>
+
+      <section id="prism-visual">
+        <h2>06 · PrismVisual chart</h2>
+        <p>
+          The Prism chart is the protocol's signature view. Every position the strategy currently holds renders as a colored block whose <em>x-extent</em> spans the position's tick range and whose <em>height</em> is its liquidity weight. A dashed vertical line marks the current pool tick.
+        </p>
+        <p>
+          For a 3-position bell strategy:
+        </p>
+        <ul>
+          <li>The <strong>center block</strong> sits over the current price and carries the most liquidity (where most fees are earned).</li>
+          <li>The <strong>side blocks</strong> sit on either side at lower weight — they catch fees when price moves, and prevent dust from accumulating out of range.</li>
+          <li>If price drifts past a side block's range, that block's color shifts (cool spectrum) and the rebalance threshold gets closer to triggering.</li>
+        </ul>
+        <p>
+          The visualization is purely declarative: tick coordinates → SVG <code>x</code> via <code>d3-scale</code>; weights → height. There is no animation outside of a fade when positions update post-rebalance.
+        </p>
+      </section>
+
+      <section id="deposit">
+        <h2>07 · Depositing liquidity</h2>
+        <p>The Deposit form is a state machine. The flow:</p>
+        <ol>
+          <li><strong>Idle</strong> — both amount inputs empty, max-slippage chip selectable (0.10% / 0.50% / 1.00%).</li>
+          <li><strong>Awaiting approval (token 0)</strong> — if the vault doesn't have an ERC-20 allowance for the first input, prompt to approve.</li>
+          <li><strong>Awaiting approval (token 1)</strong> — same for the second input.</li>
+          <li><strong>Simulating</strong> — viem <code>simulateContract</code> against <code>Vault.deposit</code> to surface reverts before submission.</li>
+          <li><strong>Awaiting submit</strong> — user reviews the simulated outputs (shares minted, slippage), clicks Submit.</li>
+          <li><strong>Pending</strong> — tx hash + Basescan link, watch loop on <code>waitForTransactionReceipt</code>.</li>
+          <li><strong>Confirmed / Failed</strong> — terminal state; on failure, the form preserves user inputs and surfaces a friendly reason via <code>TxErrorToast</code>.</li>
+        </ol>
+        <p>
+          The whole machine is encoded in the <code>TxFlowStatus</code> discriminated union (<code>apps/web/lib/tx-status.ts</code>). Every UI branch maps to exactly one variant — no nullable fields, no partial states. If the user disconnects mid-flow, the form falls back to the connect-wallet primary CTA visible in the screenshot.
+        </p>
+        <div class="callout">
+          <strong>Slippage chips.</strong> Default is 0.50%. Lower is safer but more likely to fail in a fast market; higher is more forgiving but exposes the deposit to MEV. The recommended setting is shown as the active chip.
+        </div>
+      </section>
+
+      <section id="advanced">
+        <h2>08 · Advanced flows</h2>
+
+        <h3><span class="pill live">Live now</span>Multi-position structure</h3>
+        <p>
+          Most ALMs hold a single position around the current price. PRISM splits the deposit into <strong>N positions</strong> (typically 3–5) determined by the strategy contract. Each position has its own tick range and weight; together they form the "prism" the chart visualizes. This shape lets a single vault have:
+        </p>
+        <ul>
+          <li><strong>Tighter center liquidity</strong> for fee capture at the current price.</li>
+          <li><strong>Wider edges</strong> that earn during regular volatility without fully going out of range.</li>
+          <li><strong>Predictable IL profile</strong> the user can read off the chart at a glance.</li>
+        </ul>
+
+        <h3><span class="pill next">M3</span>Rebalances</h3>
+        <p>
+          The <em>Rebalances</em> tab (visible in the nav, content lands with M3) shows the most recent rebalance events for every vault: timestamp, gas used, tick before / after, and the keeper address that submitted. Users can audit that the off-chain keeper is behaving correctly without trusting it.
+        </p>
+
+        <h3><span class="pill future">v1.1</span>MEV-funded LP yield</h3>
+        <p>
+          PRISM's V4 hook observes every swap that touches a managed pool. In v1.0 the hook emits <code>SwapObserved</code> events with the post-swap tick + sqrtPrice, which off-chain analytics use to compute the deviation from oracle truth. In v1.1 the hook captures backrun-style arbitrage deltas in-protocol and routes them back to the vault as additional yield — the "MEV-funded" pillar surfaced on the landing page.
+        </p>
+
+        <h3><span class="pill next">M5</span>Withdraw flow</h3>
+        <p>
+          Withdraw is intentionally kept simple: the user enters a share amount, the form previews the proportional token outputs, and submission burns the shares atomically. <strong>Withdraw is never pausable</strong> — invariant 6 in the contract guarantees users can always exit, even from a vault whose deposits have been paused.
+        </p>
+      </section>
+
+      <section id="errors">
+        <h2>09 · Error states</h2>
+        <p>
+          The app has three layers of error handling:
+        </p>
+        <ul>
+          <li><strong>404 (route miss)</strong> — soft handled inside the app shell. Header + footer remain mounted so users can navigate elsewhere with one click.</li>
+          <li><strong>Route boundary</strong> (<code>app/error.tsx</code>) — caught render errors render a contained card with a retry button. Sentry receives the exception with <code>boundary:route</code>.</li>
+          <li><strong>Global boundary</strong> (<code>app/global-error.tsx</code>) — last-resort frame for layout-level crashes; renders its own <code>&lt;html&gt;</code>/<code>&lt;body&gt;</code> because Next replaces the root. Sentry receives the exception with <code>boundary:global</code>.</li>
+        </ul>
+        <figure>
+          <img src="screenshots/08-not-found.png" alt="404 not-found page" />
+          <figcaption>404 page. Stays inside the shell so navigation is one click away.</figcaption>
+        </figure>
+        <p>
+          On-chain errors get their own surface: <code>WrongNetworkBanner</code> appears at the top of the page when the connected wallet is not on Base Sepolia, and <code>TxErrorToast</code> shows a translated reason for any reverted simulation or submission.
+        </p>
+      </section>
+
+      <section id="mobile">
+        <h2>10 · Mobile experience</h2>
+        <p>
+          The dApp targets Base Sepolia on a mobile wallet too. The shell narrows; the feature cards stack; the deposit form remains full-width and tappable. Both pages below were captured at 390×844 (iPhone 12/13/14).
+        </p>
+        <div class="grid-2">
+          <figure class="mobile">
+            <img src="screenshots/02-home-mobile.png" alt="Landing page on mobile" />
+            <figcaption>Landing page — mobile.</figcaption>
+          </figure>
+          <figure class="mobile">
+            <img src="screenshots/07-vault-detail-mobile.png" alt="Vault detail on mobile" />
+            <figcaption>Vault detail — mobile. Sections stack vertically; chart compresses but stays readable.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section id="status">
+        <h2>11 · What's live vs. coming</h2>
+        <p>Status of every feature in this walkthrough as of the testnet build:</p>
+        <ul>
+          <li><span class="pill live">Live</span><strong>App shell, landing, vault list (loading / empty)</strong></li>
+          <li><span class="pill live">Live</span><strong>Vault detail page</strong> (renders against any address; on-chain reads return zeros until contracts ship)</li>
+          <li><span class="pill live">Live</span><strong>PrismVisual chart</strong> (positions are mocked from the page until the registry is wired)</li>
+          <li><span class="pill live">Live</span><strong>Deposit form state machine</strong> (idle → approval → simulate → submit → pending → confirmed)</li>
+          <li><span class="pill live">Live</span><strong>Sentry + Tenderly monitoring</strong> (DSNs gated; runbook in <code>docs/runbook.md</code>)</li>
+          <li><span class="pill next">Cohort 1</span><strong>Vault list active state</strong> (lights up after the first vault deploy)</li>
+          <li><span class="pill next">M5</span><strong>Withdraw form</strong></li>
+          <li><span class="pill next">M3</span><strong>Rebalances tab</strong></li>
+          <li><span class="pill future">v1.1</span><strong>MEV-funded yield</strong> (hook captures arb deltas in-protocol, not just observed)</li>
+          <li><span class="pill future">Mainnet</span><strong>Base mainnet deploy</strong> (gated on M5 audit, ADR-006)</li>
+        </ul>
+      </section>
+    </main>
+
+    <footer>
+      Captured against the working <code>apps/web</code> build · Base Sepolia testnet only · Mainnet release gated on M5 audit
+    </footer>
+  </body>
+</html>

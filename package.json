@@ -22,6 +22,7 @@
     "verify-hook": "tsx scripts/verify-hook.ts"
   },
   "devDependencies": {
+    "playwright": "^1.59.1",
     "prettier": "^3.3.3",
     "tsx": "^4.19.2",
     "turbo": "^2.3.3",
