@@ -1,8 +1,9 @@
+@import "./tokens.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Brand tokens land in #1 (design/1-brand-tokens). */
 :root {
   color-scheme: dark;
 }
@@ -10,6 +11,18 @@
 html,
 body {
   height: 100%;
-  background: #0c0a14;
-  color: #ebe5d5;
+}
+
+body {
+  background: rgb(var(--color-canvas));
+  color: rgb(var(--color-text));
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: rgb(var(--color-spectrum-violet) / 0.4);
+  color: rgb(var(--color-text));
 }
