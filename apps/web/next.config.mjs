@@ -1,3 +1,5 @@
+import {withSentryConfig} from "@sentry/nextjs";
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -21,4 +23,15 @@ const nextConfig = {
   },
 };
 
-export default nextConfig;
+// withSentryConfig is a no-op at runtime when no DSN is set — it just
+// wires source-map upload + tunnel options. Source-map upload requires
+// SENTRY_AUTH_TOKEN at build time; without it the wrapper degrades to
+// regular Next builds.
+export default withSentryConfig(nextConfig, {
+  silent: true,
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  tunnelRoute: "/monitoring",
+  hideSourceMaps: true,
+  disableLogger: true,
+});

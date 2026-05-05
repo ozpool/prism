@@ -1,5 +1,8 @@
 "use client";
 
+import * as Sentry from "@sentry/nextjs";
+import {useEffect} from "react";
+
 // Root-level error boundary. Renders only when the root layout itself
 // fails (i.e. something below <Providers> threw before the AppShell could
 // mount). Must define its own <html>/<body> because Next replaces the root.
@@ -10,6 +13,9 @@ export default function GlobalError({
   error: Error & {digest?: string};
   reset: () => void;
 }) {
+  useEffect(() => {
+    Sentry.captureException(error, {tags: {boundary: "global"}});
+  }, [error]);
   return (
     <html lang="en" className="dark">
       <body
