@@ -58,11 +58,12 @@ contract Deploy is Script {
         console.log("BellStrategy:", address(strategy));
 
         // 2. Oracle adapter — fail-soft, single read shape.
+        // Defaults match ChainlinkAdapter.DEFAULT_STALENESS / DEFAULT_GRACE_PERIOD.
         adapter = new ChainlinkAdapter(
             AggregatorV3(feed),
             AggregatorV3(sequencer),
-            ChainlinkAdapter(address(0)).DEFAULT_STALENESS(), // 3600
-            ChainlinkAdapter(address(0)).DEFAULT_GRACE_PERIOD(), // 3600
+            3600, // staleness
+            3600, // grace period
             priceScaleNum,
             priceScaleDen
         );
@@ -74,11 +75,18 @@ contract Deploy is Script {
         //    placeholder, then deploy hook + factory atomically. The
         //    factory's CREATE address is deterministic given the
         //    deployer + nonce, so we can predict it.
+        //
+        //    Use the broadcaster (derived from the private key) — under
+        //    vm.startBroadcast, tx.origin is Foundry's DefaultSender,
+        //    not the EOA that actually submits the tx. Hook ctor + the
+        //    factory create2 see the broadcaster as msg.sender.
+        address broadcaster = vm.addr(deployerKey);
         address futureFactoryAddr = vm.computeCreateAddress(
-            // deployer at the moment the factory is created
-            tx.origin,
-            // nonce after hook deploy
-            vm.getNonce(tx.origin) + 1
+            broadcaster,
+            // nonce after hook deploy (hook is CREATE2 via Foundry's
+            // deployer, so does not bump broadcaster nonce; broadcaster
+            // currently holds nonces for BellStrategy + ChainlinkAdapter)
+            vm.getNonce(broadcaster) + 1
         );
 
         bytes32 hookSalt = _mineHookSalt(pm, futureFactoryAddr);
@@ -106,14 +114,19 @@ contract Deploy is Script {
         // initial pool list is locked.
     }
 
+    /// @dev Foundry's canonical CREATE2 deployer. Inline assembly
+    ///      `create2` inside a script routes through this proxy, so the
+    ///      salt must be mined against this address — not msg.sender.
+    address internal constant CREATE2_DEPLOYER = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
+
     /// @dev Minimal in-script salt miner. Same algorithm as #25 but
     ///      inlined here so the script doesn't pull a separate lib.
-    function _mineHookSalt(IPoolManager pm, address factoryAddr) internal view returns (bytes32) {
+    function _mineHookSalt(IPoolManager pm, address factoryAddr) internal pure returns (bytes32) {
         bytes32 initCodeHash = keccak256(abi.encodePacked(type(ProtocolHook).creationCode, abi.encode(pm, factoryAddr)));
         for (uint256 i = 0; i < 200_000; i++) {
             bytes32 salt = bytes32(i);
             address predicted =
-                address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), msg.sender, salt, initCodeHash)))));
+                address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), CREATE2_DEPLOYER, salt, initCodeHash)))));
             if (uint160(predicted) & 0x3FFF == 0x05C0) {
                 return salt;
             }
