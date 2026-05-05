@@ -1,0 +1,28 @@
+{
+  "name": "@prism/keeper",
+  "version": "0.0.0",
+  "private": true,
+  "description": "PRISM rebalance keeper — TypeScript + viem",
+  "license": "BUSL-1.1",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo \"no lint yet\" && exit 0",
+    "test": "echo \"no tests yet\" && exit 0"
+  },
+  "dependencies": {
+    "@prism/shared": "workspace:*",
+    "pino": "^9.5.0",
+    "viem": "^2.48.4",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "20.16.10",
+    "tsx": "^4.19.2",
+    "typescript": "5.6.3"
+  }
+}

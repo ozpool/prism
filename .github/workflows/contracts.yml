@@ -1,0 +1,198 @@
+name: contracts
+
+on:
+  pull_request:
+    paths:
+      - "packages/contracts/**"
+      - ".github/workflows/contracts.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "packages/contracts/**"
+      - ".github/workflows/contracts.yml"
+
+permissions:
+  contents: read
+
+# Pinning toolchain versions in one place. Bump deliberately; avoid
+# floating ranges that drift CI behaviour out from under us.
+env:
+  FOUNDRY_VERSION: nightly-de33b6af53005037b463318d2628b5cfcaf39916
+  SLITHER_VERSION: 0.10.4
+  ADERYN_VERSION: v0.5.4
+  PYTHON_VERSION: "3.12"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # -------------------------------------------------------------------------
+  # forge build + forge test + forge snapshot --check
+  #
+  # Runs in `packages/contracts`. Caches the lib/ submodule directory
+  # across runs (it is git-ignored relative to the workspace but lives
+  # under the package; the cache key incorporates a hash of any pinned
+  # commits we record in `.gitmodules` so a submodule bump invalidates
+  # the cache cleanly).
+  # -------------------------------------------------------------------------
+  build-and-test:
+    name: build · test · snapshot
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/contracts
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: ${{ env.FOUNDRY_VERSION }}
+
+      - name: Cache lib/
+        uses: actions/cache@v4
+        with:
+          path: packages/contracts/lib
+          key: lib-${{ runner.os }}-${{ hashFiles('.gitmodules') }}
+          restore-keys: |
+            lib-${{ runner.os }}-
+
+      - name: forge --version
+        run: forge --version
+
+      - name: forge build
+        run: forge build --sizes
+
+      - name: forge test
+        run: forge test -vvv
+
+      - name: forge snapshot --check
+        run: forge snapshot --check
+        # First-run note: when no .gas-snapshot is present in the
+        # repo, snapshot --check exits 0 and writes one. After it
+        # lands on main, subsequent PRs are checked against it.
+        continue-on-error: false
+
+  # -------------------------------------------------------------------------
+  # Slither — static analysis. Fails the job on any finding above
+  # informational severity. The PRD names Slither + Aderyn as the
+  # required pre-merge gate for contracts (CLAUDE.md §Standing Rules).
+  # -------------------------------------------------------------------------
+  slither:
+    name: slither
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/contracts
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: ${{ env.FOUNDRY_VERSION }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Slither
+        run: pip install --no-cache-dir slither-analyzer==${{ env.SLITHER_VERSION }}
+
+      - name: Cache lib/
+        uses: actions/cache@v4
+        with:
+          path: packages/contracts/lib
+          key: lib-${{ runner.os }}-${{ hashFiles('.gitmodules') }}
+          restore-keys: |
+            lib-${{ runner.os }}-
+
+      - name: forge build (Slither needs out/)
+        run: forge build --build-info
+
+      - name: Slither
+        # `--fail-medium` blocks the merge on medium and high findings;
+        # informational and low surface in the summary but do not gate.
+        run: |
+          slither . \
+            --foundry-out-directory out \
+            --foundry-ignore-compile \
+            --filter-paths "lib/" \
+            --exclude-low \
+            --exclude-informational \
+            --fail-medium
+
+  # -------------------------------------------------------------------------
+  # Aderyn — second static analyser; complements Slither. Different
+  # rule set, lower false-positive rate on V4-style hooks.
+  # -------------------------------------------------------------------------
+  aderyn:
+    name: aderyn
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/contracts
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: ${{ env.FOUNDRY_VERSION }}
+
+      - name: Cache lib/
+        uses: actions/cache@v4
+        with:
+          path: packages/contracts/lib
+          key: lib-${{ runner.os }}-${{ hashFiles('.gitmodules') }}
+          restore-keys: |
+            lib-${{ runner.os }}-
+
+      - name: Install Aderyn
+        run: cargo install aderyn --version ${{ env.ADERYN_VERSION }} --locked
+
+      - name: forge build (Aderyn needs out/)
+        run: forge build
+
+      - name: Aderyn
+        run: aderyn .
+
+  # -------------------------------------------------------------------------
+  # Format gate — `forge fmt --check`. Runs without the heavy
+  # toolchain so PRs that touch only formatting fail fast.
+  # -------------------------------------------------------------------------
+  fmt:
+    name: forge fmt --check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/contracts
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 1
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: ${{ env.FOUNDRY_VERSION }}
+
+      - name: forge fmt --check
+        run: forge fmt --check
