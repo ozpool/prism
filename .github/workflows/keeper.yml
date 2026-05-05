@@ -1,0 +1,97 @@
+name: keeper
+
+on:
+  pull_request:
+    paths:
+      - "apps/keeper/**"
+      - "packages/shared/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/keeper.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/keeper/**"
+      - "packages/shared/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/keeper.yml"
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "20"
+  PNPM_VERSION: "10.18.0"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # -------------------------------------------------------------------------
+  # typecheck + lint + build
+  # -------------------------------------------------------------------------
+  typecheck-lint-build:
+    name: typecheck · lint · build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck shared
+        run: pnpm --filter @prism/shared typecheck
+
+      - name: Typecheck keeper
+        run: pnpm --filter @prism/keeper typecheck
+
+      - name: Lint keeper
+        run: pnpm --filter @prism/keeper lint
+
+      - name: Build keeper
+        run: pnpm --filter @prism/keeper build
+
+  # -------------------------------------------------------------------------
+  # docker build smoke test
+  #
+  # Builds the keeper image to catch Dockerfile regressions on PR.
+  # Image push lands in #66 with the rest of the deploy pipeline.
+  # -------------------------------------------------------------------------
+  docker-build:
+    name: docker build
+    runs-on: ubuntu-latest
+    needs: typecheck-lint-build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build keeper image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/keeper/Dockerfile
+          push: false
+          load: true
+          tags: prism-keeper:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
