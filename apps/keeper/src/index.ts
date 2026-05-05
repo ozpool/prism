@@ -7,12 +7,14 @@ import {loadConfig} from "./config.js";
 import {startHealthServer, stopHealthServer} from "./health.js";
 import {Metrics} from "./metrics.js";
 import {runPollLoop} from "./poll.js";
+import {captureException, flushSentry, initSentry} from "./sentry.js";
 import {gweiToWei} from "./submit.js";
 
 const METRIC_SNAPSHOT_INTERVAL_MS = 60_000;
 
 async function main() {
   const config = loadConfig();
+  initSentry({release: process.env.SENTRY_RELEASE, environment: process.env.NODE_ENV});
   const logger = pino({level: config.LOG_LEVEL});
 
   const account = privateKeyToAccount(config.KEEPER_PRIVATE_KEY as `0x${string}`);
@@ -95,7 +97,9 @@ async function main() {
         await stopHealthServer(healthServer);
       } catch (err) {
         logger.error({err}, "shutdown error");
+        captureException(err, {phase: "shutdown"});
       }
+      await flushSentry();
       logger.info({metrics: metrics.snapshot()}, "shutdown complete");
       resolve();
     };
@@ -104,8 +108,10 @@ async function main() {
   });
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
   // eslint-disable-next-line no-console
   console.error(err);
+  captureException(err, {phase: "startup"});
+  await flushSentry();
   process.exit(1);
 });

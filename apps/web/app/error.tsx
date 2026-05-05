@@ -1,5 +1,6 @@
 "use client";
 
+import * as Sentry from "@sentry/nextjs";
 import {useEffect} from "react";
 
 // Route-level error boundary. Caught errors render this page inside the
@@ -13,9 +14,7 @@ export default function RouteError({
   reset: () => void;
 }) {
   useEffect(() => {
-    // Surface during dev; replace with a real telemetry sink (Sentry, etc.)
-    // when telemetry lands.
-    console.error("[prism] route error", error);
+    Sentry.captureException(error, {tags: {boundary: "route"}});
   }, [error]);
 
   return (
