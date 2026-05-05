@@ -189,30 +189,120 @@ contract VaultStorageTest is Test {
     // Stub method reverts (replaced by #27/#28/#29)
     // -------------------------------------------------------------------------
 
-    function test_deposit_stubReverts() public {
-        vm.expectRevert(Errors.UnknownOp.selector);
+    function test_deposit_revertsWhenPaused() public {
+        vm.prank(OWNER);
+        vault.setDepositsPaused(true);
+
+        vm.expectRevert(Errors.DepositsPaused.selector);
         vault.deposit(1e18, 1e18, 0, 0, address(this));
     }
 
-    function test_withdraw_stubReverts() public {
-        vm.expectRevert(Errors.UnknownOp.selector);
+    function test_deposit_revertsOnZeroRecipient() public {
+        vm.expectRevert(Errors.ZeroAddress.selector);
+        vault.deposit(1e18, 1e18, 0, 0, address(0));
+    }
+
+    function test_deposit_revertsOnZeroAmounts() public {
+        vm.expectRevert(Errors.ZeroShares.selector);
+        vault.deposit(0, 0, 0, 0, address(this));
+    }
+
+    function test_unlockCallback_revertsForNonPoolManager() public {
+        vm.expectRevert(Errors.OnlyPoolManager.selector);
+        vault.unlockCallback(abi.encode(uint8(0), bytes("")));
+    }
+
+    function test_withdraw_revertsOnZeroShares() public {
+        vm.expectRevert(Errors.InvalidShareAmount.selector);
+        vault.withdraw(0, 0, 0, address(this));
+    }
+
+    function test_withdraw_revertsOnInsufficientBalance() public {
+        vm.expectRevert(Errors.InvalidShareAmount.selector);
         vault.withdraw(1, 0, 0, address(this));
     }
 
-    function test_rebalance_stubReverts() public {
-        vm.expectRevert(Errors.UnknownOp.selector);
+    function test_withdraw_revertsOnZeroRecipient() public {
+        // Mint shares directly (bypassing deposit) to test the recipient
+        // check independently of the deposit flow.
+        deal(address(vault), address(this), 1e18);
+        vm.expectRevert(Errors.ZeroAddress.selector);
+        vault.withdraw(1, 0, 0, address(0));
+    }
+
+    function test_withdraw_neverPaused() public {
+        // Even with deposits paused, withdraw must remain reachable.
+        vm.prank(OWNER);
+        vault.setDepositsPaused(true);
+
+        // Withdraw still validates (zero shares → InvalidShareAmount),
+        // not DepositsPaused.
+        vm.expectRevert(Errors.InvalidShareAmount.selector);
+        vault.withdraw(0, 0, 0, address(this));
+    }
+
+    function test_rebalance_revertsWhenStrategyGateClosed() public {
+        // Default-deployed BellStrategy mock returns false for
+        // shouldRebalance under all-quiet conditions, so the entry
+        // point reverts RebalanceNotNeeded before reaching unlock.
+        // Mock the strategy.shouldRebalance call to return false.
+        vm.mockCall(STRATEGY, abi.encodeWithSelector(IStrategy.shouldRebalance.selector), abi.encode(false));
+        vm.expectRevert(Errors.RebalanceNotNeeded.selector);
         vault.rebalance();
     }
 
-    function test_views_stubsAreSafe() public view {
-        // getPositions returns empty array on a fresh vault.
+    function test_rebalance_lastTimestampInitiallyZero() public view {
+        assertEq(vault.lastRebalanceTimestamp(), 0);
+        assertEq(vault.lastRebalanceTick(), 0);
+    }
+
+    function _mockZeroBalances() internal {
+        vm.mockCall(
+            TOKEN0,
+            abi.encodeWithSelector(bytes4(keccak256("balanceOf(address)")), address(vault)),
+            abi.encode(uint256(0))
+        );
+        vm.mockCall(
+            TOKEN1,
+            abi.encodeWithSelector(bytes4(keccak256("balanceOf(address)")), address(vault)),
+            abi.encode(uint256(0))
+        );
+    }
+
+    function test_views_emptyVault() public {
+        _mockZeroBalances();
+
         Vault.Position[] memory ps = vault.getPositions();
         assertEq(ps.length, 0);
 
-        // getTotalAmounts returns 0/0 stub.
         (uint256 a, uint256 b) = vault.getTotalAmounts();
         assertEq(a, 0);
         assertEq(b, 0);
+    }
+
+    function test_sharePrice_zeroSupplyReturnsUnit() public view {
+        // sharePrice short-circuits on totalSupply == 0; no token reads.
+        (uint256 p0, uint256 p1) = vault.sharePrice();
+        assertEq(p0, 1e18);
+        assertEq(p1, 1e18);
+    }
+
+    function test_getTotalAmounts_reflectsIdleBalances() public {
+        // Mock token0/token1 balanceOf calls to return non-zero amounts.
+        vm.mockCall(
+            TOKEN0,
+            abi.encodeWithSelector(bytes4(keccak256("balanceOf(address)")), address(vault)),
+            abi.encode(uint256(1000e18))
+        );
+        vm.mockCall(
+            TOKEN1,
+            abi.encodeWithSelector(bytes4(keccak256("balanceOf(address)")), address(vault)),
+            abi.encode(uint256(2000e18))
+        );
+
+        (uint256 a, uint256 b) = vault.getTotalAmounts();
+        assertEq(a, 1000e18);
+        assertEq(b, 2000e18);
     }
 
     // -------------------------------------------------------------------------
