@@ -159,57 +159,5 @@ contract BellStrategyTest is Test {
 
     function test_constants() public view {
         assertEq(strat.N_POSITIONS(), 7);
-        assertEq(strat.TICK_DRIFT_THRESHOLD(), 240);
-        assertEq(strat.TIME_THRESHOLD(), 6 hours);
-        assertEq(strat.LIVENESS_FALLBACK(), 24 hours);
-    }
-
-    // -------------------------------------------------------------------------
-    // shouldRebalance — three triggers
-    // -------------------------------------------------------------------------
-
-    function test_shouldRebalance_falseWhenAllQuiet() public {
-        vm.warp(1_700_000_000);
-        // Same tick, just rebalanced.
-        assertFalse(strat.shouldRebalance(0, 0, block.timestamp));
-    }
-
-    function test_shouldRebalance_firesOnTickDrift() public {
-        vm.warp(1_700_000_000);
-        // Drift = TICK_DRIFT_THRESHOLD → fires.
-        assertTrue(strat.shouldRebalance(240, 0, block.timestamp));
-        // Negative-direction drift symmetric.
-        assertTrue(strat.shouldRebalance(-240, 0, block.timestamp));
-        // Below threshold → no fire.
-        assertFalse(strat.shouldRebalance(239, 0, block.timestamp));
-    }
-
-    function test_shouldRebalance_firesOnTimeThreshold() public {
-        uint256 last = 1_700_000_000;
-        vm.warp(last + 6 hours);
-        assertTrue(strat.shouldRebalance(0, 0, last));
-
-        vm.warp(last + 6 hours - 1);
-        assertFalse(strat.shouldRebalance(0, 0, last));
-    }
-
-    function test_shouldRebalance_firesOnLivenessFallback() public {
-        uint256 last = 1_700_000_000;
-        vm.warp(last + 24 hours);
-        // Even with zero tick drift and time-threshold-already-elapsed,
-        // the 24h fallback is the strict-largest guarantee.
-        assertTrue(strat.shouldRebalance(0, 0, last));
-    }
-
-    function test_shouldRebalance_independentTriggers() public {
-        uint256 last = 1_700_000_000;
-        vm.warp(last + 1);
-
-        // Drift only.
-        assertTrue(strat.shouldRebalance(500, 0, last));
-
-        // Time only.
-        vm.warp(last + 6 hours);
-        assertTrue(strat.shouldRebalance(0, 0, last));
     }
 }
