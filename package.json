@@ -17,11 +17,14 @@
     "dev": "turbo run dev",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
-    "export-abis": "tsx scripts/export-abis.ts"
+    "export-abis": "tsx scripts/export-abis.ts",
+    "post-deploy": "tsx scripts/post-deploy.ts",
+    "verify-hook": "tsx scripts/verify-hook.ts"
   },
   "devDependencies": {
     "prettier": "^3.3.3",
     "tsx": "^4.19.2",
-    "turbo": "^2.3.3"
+    "turbo": "^2.3.3",
+    "viem": "^2.48.4"
   }
 }
