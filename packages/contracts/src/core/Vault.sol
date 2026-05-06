@@ -624,20 +624,134 @@ contract Vault is IVault, ERC20, IUnlockCallback {
         return abi.encode(amount0, amount1);
     }
 
-    /// @dev Stub: real implementation removes all positions, optionally
-    ///      runs a slippage-bounded internal swap to rebalance the
-    ///      idle balance, calls strategy.computePositions for the new
-    ///      shape, deploys via modifyLiquidity per target, settles
-    ///      deltas, and mints the keeper bonus shares (ADR-007 §keeper
-    ///      economics).
+    /// @notice Implements the rebalance hot-path inside the PoolManager unlock context.
+    /// @dev Execution flow:
+    ///   1. Remove all current positions (modifyLiquidity with negative delta),
+    ///      take both currencies into the vault.
+    ///   2. Snapshot vault idle balances (now including the newly-taken tokens).
+    ///   3. Read pool state (sqrtPrice + currentTick).
+    ///   4. Ask strategy for the new target shape against the current idle.
+    ///   5. Validate strategy output (invariants #2 and #3).
+    ///   6. Deploy each target via modifyLiquidity (positive delta), accumulate
+    ///      caller deltas.
+    ///   7. Settle owed currencies (sync → transfer → settle).
+    ///   8. Persist new positions and return (newTick, nPositions, gasUsed).
+    ///
+    /// V1.0 deliberately omits the bounded internal swap (ADR-004 future work)
+    /// and the keeper-bonus mint (ADR-007 economics deferred to v1.1) — the
+    /// rebalance is a pure remove-all → redeploy with the existing token mix.
+    /// Drift accumulated by the strategy's weight choice is acceptable.
     function _handleRebalance(
         RebalancePayload memory /*payload*/
     )
         internal
-        pure
         returns (bytes memory)
     {
-        revert Errors.UnknownOp();
+        uint256 gasStart = gasleft();
+
+        // ── 1. Remove every active position ──────────────────────────────────
+        int256 removedDelta0;
+        int256 removedDelta1;
+        uint256 nOld = _positions.length;
+        for (uint256 i; i < nOld; ++i) {
+            Position storage p = _positions[i];
+            if (p.liquidity == 0) continue;
+
+            (BalanceDelta callerDelta,) = poolManager.modifyLiquidity(
+                _poolKey,
+                ModifyLiquidityParams({
+                    tickLower: p.tickLower,
+                    tickUpper: p.tickUpper,
+                    liquidityDelta: -int256(uint256(p.liquidity)),
+                    salt: bytes32(i)
+                }),
+                ""
+            );
+            removedDelta0 += callerDelta.amount0();
+            removedDelta1 += callerDelta.amount1();
+        }
+
+        // Take into the vault. callerDelta on remove is non-negative; clamp.
+        uint256 toTake0 = removedDelta0 > 0 ? uint256(removedDelta0) : 0;
+        uint256 toTake1 = removedDelta1 > 0 ? uint256(removedDelta1) : 0;
+        if (toTake0 > 0) poolManager.take(_poolKey.currency0, address(this), toTake0);
+        if (toTake1 > 0) poolManager.take(_poolKey.currency1, address(this), toTake1);
+
+        // ── 2. Idle balances drive the new shape ─────────────────────────────
+        uint256 idle0 = token0.balanceOf(address(this));
+        uint256 idle1 = token1.balanceOf(address(this));
+
+        // ── 3. Read pool state ───────────────────────────────────────────────
+        (uint160 sqrtPriceX96, int24 currentTick,,) = poolManager.getSlot0(_poolKey.toId());
+
+        // ── 4. Ask strategy for new positions ────────────────────────────────
+        IStrategy.TargetPosition[] memory targets =
+            strategy.computePositions(currentTick, _poolKey.tickSpacing, idle0, idle1);
+
+        // ── 5. Validate strategy output ──────────────────────────────────────
+        uint256 nPos = targets.length;
+        if (nPos > MAX_POSITIONS) revert Errors.MaxPositionsExceeded(nPos);
+
+        uint256 weightSum;
+        for (uint256 i; i < nPos; ++i) {
+            weightSum += targets[i].weight;
+        }
+        if (nPos > 0 && weightSum != 10_000) revert Errors.WeightsDoNotSum(weightSum);
+
+        // ── 6. Deploy each target ────────────────────────────────────────────
+        delete _positions;
+
+        int256 deployedDelta0;
+        int256 deployedDelta1;
+        for (uint256 i; i < nPos; ++i) {
+            IStrategy.TargetPosition memory t = targets[i];
+
+            uint256 amt0 = FullMath.mulDiv(idle0, t.weight, 10_000);
+            uint256 amt1 = FullMath.mulDiv(idle1, t.weight, 10_000);
+
+            uint128 liquidity = LiquidityAmounts.getLiquidityForAmounts(
+                sqrtPriceX96,
+                TickMath.getSqrtPriceAtTick(t.tickLower),
+                TickMath.getSqrtPriceAtTick(t.tickUpper),
+                amt0,
+                amt1
+            );
+            if (liquidity == 0) continue;
+
+            (BalanceDelta callerDelta,) = poolManager.modifyLiquidity(
+                _poolKey,
+                ModifyLiquidityParams({
+                    tickLower: t.tickLower,
+                    tickUpper: t.tickUpper,
+                    liquidityDelta: int256(uint256(liquidity)),
+                    salt: bytes32(i)
+                }),
+                ""
+            );
+
+            deployedDelta0 += callerDelta.amount0();
+            deployedDelta1 += callerDelta.amount1();
+
+            _positions.push(IVault.Position({tickLower: t.tickLower, tickUpper: t.tickUpper, liquidity: liquidity}));
+        }
+
+        // ── 7. Settle owed currencies (negative delta = vault owes pool) ─────
+        uint256 owe0 = deployedDelta0 < 0 ? uint256(-deployedDelta0) : 0;
+        uint256 owe1 = deployedDelta1 < 0 ? uint256(-deployedDelta1) : 0;
+        if (owe0 > 0) {
+            poolManager.sync(_poolKey.currency0);
+            token0.safeTransfer(address(poolManager), owe0);
+            poolManager.settle();
+        }
+        if (owe1 > 0) {
+            poolManager.sync(_poolKey.currency1);
+            token1.safeTransfer(address(poolManager), owe1);
+            poolManager.settle();
+        }
+
+        // ── 8. Return result ─────────────────────────────────────────────────
+        uint256 gasUsed = gasStart - gasleft();
+        return abi.encode(currentTick, nPos, gasUsed);
     }
 
     /// @inheritdoc IVault
@@ -686,11 +800,7 @@ contract Vault is IVault, ERC20, IUnlockCallback {
     ///      entry-point gate; settlement lands during integration
     ///      testing against a real PoolManager.
     function rebalance() external override {
-        // Read the current tick from PoolManager state. For #29 we
-        // forward 0 as a placeholder — integration phase reads via
-        // `StateView.getSlot0(poolKey.toId())`. The strategy still
-        // sees a non-zero last-rebalance window the first time.
-        int24 currentTick = 0;
+        (, int24 currentTick,,) = poolManager.getSlot0(_poolKey.toId());
 
         if (!strategy.shouldRebalance(currentTick, lastRebalanceTick, lastRebalanceTimestamp)) {
             revert Errors.RebalanceNotNeeded();
