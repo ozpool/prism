@@ -80,6 +80,7 @@ async function main() {
       maxSubmitAttempts: 3,
       logger,
       metrics,
+      chain: baseSepolia,
     });
     logger.info({metrics: metrics.snapshot()}, "one-shot cycle complete");
     await flushSentry();
@@ -99,6 +100,7 @@ async function main() {
     intervalMs: config.POLL_INTERVAL_MS,
     logger,
     metrics,
+    chain: baseSepolia,
   });
 
   // Periodic metric snapshot — emits one structured log line per minute

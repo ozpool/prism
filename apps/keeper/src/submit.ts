@@ -36,6 +36,12 @@ export interface SubmitDeps {
   attemptTimeoutMs: number;
   /// Maximum reprice retries before giving up.
   maxAttempts: number;
+  /// Chain object to pass to writeContract. Required for viem v2 — when
+  /// the wallet client is unwrapped into a structural slice (poll.ts),
+  /// the implicit chain on the original client is lost and viem sends a
+  /// transaction with no chainId, which the RPC rejects with a
+  /// JSON-RPC envelope error. Forwarding the chain explicitly fixes it.
+  chain?: unknown;
 }
 
 export type SubmitResult =
@@ -59,7 +65,7 @@ export type SubmitResult =
 ///
 /// Returns a typed verdict the caller can log + tally.
 export async function submitRebalance(deps: SubmitDeps): Promise<SubmitResult> {
-  const {client, account, vault, logger, maxFeePerGasCap, attemptTimeoutMs, maxAttempts} = deps;
+  const {client, account, vault, logger, maxFeePerGasCap, attemptTimeoutMs, maxAttempts, chain} = deps;
 
   // Pin the nonce up front so retries replace rather than queue.
   const nonce = await client.getTransactionCount({address: account, blockTag: "pending"});
@@ -86,6 +92,7 @@ export async function submitRebalance(deps: SubmitDeps): Promise<SubmitResult> {
         nonce,
         maxFeePerGas,
         maxPriorityFeePerGas,
+        chain,
       });
     } catch (err) {
       lastError = errMsg(err);
