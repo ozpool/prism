@@ -5,10 +5,17 @@
 export const vaultFactoryAbi = [
   {
     type: "function",
-    name: "allVaults",
+    name: "allVaultsLength",
     stateMutability: "view",
     inputs: [],
-    outputs: [{name: "", type: "address[]"}],
+    outputs: [{name: "", type: "uint256"}],
+  },
+  {
+    type: "function",
+    name: "allVaults",
+    stateMutability: "view",
+    inputs: [{name: "i", type: "uint256"}],
+    outputs: [{name: "", type: "address"}],
   },
 ] as const;
 

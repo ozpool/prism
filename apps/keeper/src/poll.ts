@@ -62,11 +62,22 @@ export interface PollDeps {
 export async function evaluateVaults(deps: PollDeps): Promise<VaultEvaluation[]> {
   const {logger} = deps;
 
-  const vaults = (await deps.client.readContract({
+  const length = (await deps.client.readContract({
     address: deps.factory,
     abi: vaultFactoryAbi,
-    functionName: "allVaults",
-  })) as readonly Address[];
+    functionName: "allVaultsLength",
+  })) as bigint;
+
+  const vaults: Address[] = [];
+  for (let i = 0n; i < length; i++) {
+    const vault = (await deps.client.readContract({
+      address: deps.factory,
+      abi: vaultFactoryAbi,
+      functionName: "allVaults",
+      args: [i],
+    })) as Address;
+    vaults.push(vault);
+  }
 
   const results: VaultEvaluation[] = [];
   for (const vault of vaults) {

@@ -7,8 +7,16 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {IUnlockCallback} from "v4-core/interfaces/callback/IUnlockCallback.sol";
+import {FullMath} from "v4-core/libraries/FullMath.sol";
+import {StateLibrary} from "v4-core/libraries/StateLibrary.sol";
+import {TickMath} from "v4-core/libraries/TickMath.sol";
+import {BalanceDelta} from "v4-core/types/BalanceDelta.sol";
 import {Currency} from "v4-core/types/Currency.sol";
+import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
 import {PoolKey} from "v4-core/types/PoolKey.sol";
+import {ModifyLiquidityParams} from "v4-core/types/PoolOperation.sol";
+
+import {LiquidityAmounts} from "v4-periphery/libraries/LiquidityAmounts.sol";
 
 import {IProtocolHook} from "../interfaces/IProtocolHook.sol";
 import {IStrategy} from "../interfaces/IStrategy.sol";
@@ -48,6 +56,8 @@ import {Errors} from "../utils/Errors.sol";
 ///      mitigates the first-depositor inflation attack (PRD §13).
 contract Vault is IVault, ERC20, IUnlockCallback {
     using SafeERC20 for IERC20;
+    using StateLibrary for IPoolManager;
+    using PoolIdLibrary for PoolKey;
 
     /// @dev Tagged operations for `unlockCallback`. Each entry point
     ///      (deposit / withdraw / rebalance) calls `poolManager.unlock`
@@ -313,17 +323,236 @@ contract Vault is IVault, ERC20, IUnlockCallback {
         revert Errors.UnknownOp();
     }
 
-    /// @dev Stub: real implementation pulls tokens via permit2, calls
-    ///      `poolManager.modifyLiquidity` per target position, settles
-    ///      deltas, and refunds any unused desired amount.
-    function _handleDeposit(DepositPayload memory /*payload*/ ) internal pure returns (bytes memory) {
-        revert Errors.UnknownOp();
+    /// @notice Implements the deposit hot-path inside the PoolManager unlock context.
+    /// @dev Execution flow:
+    ///   1. Read current sqrtPrice + tick from PoolManager state.
+    ///   2. Ask the strategy for target positions (tick ranges + weights).
+    ///   3. Validate: weights sum to 10_000, position count ≤ MAX_POSITIONS.
+    ///   4. Per position: weight-split desired amounts → compute liquidity →
+    ///      call modifyLiquidity → accumulate callerDeltas.
+    ///   5. Slippage guard: total amounts consumed must meet caller's minimums.
+    ///   6. Settle owed currencies: sync → transfer → settle (CEI satisfied;
+    ///      tokens were pulled from payer before unlock, so vault holds them).
+    ///   7. Refund unused desired amounts back to payer.
+    ///   8. Share minting (inflation-safe first-deposit branch).
+    ///   9. Persist positions in storage.
+    ///  10. Return ABI-encoded (shares, amount0Used, amount1Used).
+    ///
+    /// Delta sign convention (V4): callerDelta.amount0() < 0 means the caller
+    /// owes token0 to PoolManager. For a pure add-liquidity this is always
+    /// negative or zero for each token that is consumed.
+    ///
+    /// Share math — first deposit:
+    ///   shares = sqrt(amount0Used * amount1Used) - MIN_SHARES
+    ///   MIN_SHARES burned to DEAD (inflation attack mitigation, PRD §13).
+    ///   Geometric mean chosen because the vault holds two assets; the L1-norm
+    ///   (amount0 + amount1) is denominated in different units and would bias
+    ///   toward whichever asset happens to have larger absolute values.
+    ///
+    /// Share math — subsequent deposits:
+    ///   shares = (amount0Used * totalSupply) / total0
+    ///   If total0 == 0 (all vault value is in token1), fall back to the
+    ///   token1 dimension.  This single-asset denominator is intentionally
+    ///   simple: a proper oracle-weighted formula is deferred to v1.1.
+    function _handleDeposit(DepositPayload memory payload) internal returns (bytes memory) {
+        // ── 1. Read current pool state ────────────────────────────────────────
+        (uint160 sqrtPriceX96, int24 currentTick,,) = poolManager.getSlot0(_poolKey.toId());
+
+        // ── 2. Ask strategy for target positions ─────────────────────────────
+        IStrategy.TargetPosition[] memory targets = strategy.computePositions(
+            currentTick, _poolKey.tickSpacing, payload.amount0Desired, payload.amount1Desired
+        );
+
+        // ── 3. Validate strategy output (invariants #2 and #3) ───────────────
+        uint256 nPos = targets.length;
+        if (nPos > MAX_POSITIONS) revert Errors.MaxPositionsExceeded(nPos);
+
+        uint256 weightSum;
+        for (uint256 i; i < nPos; ++i) {
+            weightSum += targets[i].weight;
+        }
+        if (weightSum != 10_000) revert Errors.WeightsDoNotSum(weightSum);
+
+        // ── 4. Deploy each position, accumulate deltas ───────────────────────
+        // totalDelta tracks cumulative token owed/received across all positions.
+        // Negative amounts mean we owe tokens to PoolManager.
+        int256 totalDelta0;
+        int256 totalDelta1;
+
+        // Delete existing _positions storage; this is a fresh deployment.
+        // (On first deposit _positions is empty; on subsequent deposits
+        //  after a rebalance this clears old entries before writing new ones.)
+        delete _positions;
+
+        for (uint256 i; i < nPos; ++i) {
+            IStrategy.TargetPosition memory t = targets[i];
+
+            // Weight-proportional share of desired amounts for this position.
+            uint256 amt0 = FullMath.mulDiv(payload.amount0Desired, t.weight, 10_000);
+            uint256 amt1 = FullMath.mulDiv(payload.amount1Desired, t.weight, 10_000);
+
+            // Compute maximum liquidity achievable with the position's share.
+            uint128 liquidity = LiquidityAmounts.getLiquidityForAmounts(
+                sqrtPriceX96,
+                TickMath.getSqrtPriceAtTick(t.tickLower),
+                TickMath.getSqrtPriceAtTick(t.tickUpper),
+                amt0,
+                amt1
+            );
+
+            // Skip zero-liquidity positions (price fully outside this range).
+            if (liquidity == 0) continue;
+
+            (BalanceDelta callerDelta,) = poolManager.modifyLiquidity(
+                _poolKey,
+                ModifyLiquidityParams({
+                    tickLower: t.tickLower,
+                    tickUpper: t.tickUpper,
+                    liquidityDelta: int256(uint256(liquidity)),
+                    // Use position index as salt so two positions at the same
+                    // tick range (unusual for BellStrategy but possible) are
+                    // tracked as distinct PoolManager positions.
+                    salt: bytes32(i)
+                }),
+                ""
+            );
+
+            totalDelta0 += callerDelta.amount0();
+            totalDelta1 += callerDelta.amount1();
+
+            // Persist in vault storage for view helpers and future rebalance.
+            _positions.push(IVault.Position({tickLower: t.tickLower, tickUpper: t.tickUpper, liquidity: liquidity}));
+        }
+
+        // Actual consumed amounts (flip sign: negative delta = tokens we owe).
+        // `amount0Used` / `amount1Used` are the magnitudes paid to the pool.
+        uint256 amount0Used = totalDelta0 < 0 ? uint256(-totalDelta0) : 0;
+        uint256 amount1Used = totalDelta1 < 0 ? uint256(-totalDelta1) : 0;
+
+        // ── 5. Slippage guard ─────────────────────────────────────────────────
+        if (amount0Used < payload.amount0Min) {
+            revert Errors.SlippageExceeded(amount0Used, payload.amount0Min);
+        }
+        if (amount1Used < payload.amount1Min) {
+            revert Errors.SlippageExceeded(amount1Used, payload.amount1Min);
+        }
+
+        // ── 6. Settle owed currencies ─────────────────────────────────────────
+        // V4 settlement pattern for ERC-20: sync records the pre-transfer
+        // balance so the manager can verify exactly how much arrived.
+        // Tokens were pulled into the vault by deposit() before unlock, so
+        // we transfer from vault → poolManager here.
+        if (amount0Used > 0) {
+            poolManager.sync(_poolKey.currency0);
+            token0.safeTransfer(address(poolManager), amount0Used);
+            poolManager.settle();
+        }
+        if (amount1Used > 0) {
+            poolManager.sync(_poolKey.currency1);
+            token1.safeTransfer(address(poolManager), amount1Used);
+            poolManager.settle();
+        }
+
+        // ── 7. Refund unused desired amounts back to payer ────────────────────
+        uint256 refund0 = payload.amount0Desired - amount0Used;
+        uint256 refund1 = payload.amount1Desired - amount1Used;
+        if (refund0 > 0) token0.safeTransfer(payload.payer, refund0);
+        if (refund1 > 0) token1.safeTransfer(payload.payer, refund1);
+
+        // ── 8. Share minting ──────────────────────────────────────────────────
+        uint256 shares;
+        uint256 supply = totalSupply();
+
+        if (supply == 0) {
+            // First deposit: geometric mean of consumed amounts minus the
+            // inflation-guard burn. sqrt(a * b) is safe here because each
+            // factor is a uint128-bounded callerDelta and the product fits
+            // in uint256 before the sqrt.
+            uint256 geomMean = _sqrt(amount0Used * amount1Used);
+            if (geomMean <= MIN_SHARES) revert Errors.ZeroShares();
+            // Burn MIN_SHARES to the dead address; remainder goes to recipient.
+            _mint(DEAD, MIN_SHARES);
+            shares = geomMean - MIN_SHARES;
+        } else {
+            // Subsequent deposits: scale against the dominant dimension.
+            // Use token0 notional as the reference; fall back to token1 when
+            // token0 is entirely consumed (or vault holds no token0 position).
+            // Read vault's remaining idle balances (AFTER settlement + refund)
+            // as the share-price denominator. This is the simplest pro-rata
+            // approach; an oracle-weighted formula is deferred to v1.1.
+            uint256 total0 = token0.balanceOf(address(this));
+            uint256 total1 = token1.balanceOf(address(this));
+            if (total0 > 0) {
+                shares = FullMath.mulDiv(amount0Used, supply, total0);
+            } else if (total1 > 0) {
+                shares = FullMath.mulDiv(amount1Used, supply, total1);
+            } else {
+                revert Errors.ZeroShares();
+            }
+        }
+
+        if (shares == 0) revert Errors.ZeroShares();
+        _mint(payload.to, shares);
+
+        return abi.encode(shares, amount0Used, amount1Used);
+    }
+
+    /// @dev Integer square root (Babylonian method). Returns floor(sqrt(x)).
+    ///      Used only for first-deposit share math.
+    function _sqrt(uint256 x) private pure returns (uint256 z) {
+        if (x == 0) return 0;
+        // Initial estimate: bit-length / 2.
+        assembly ("memory-safe") {
+            z := 1
+            let y := x
+            if iszero(lt(y, 0x100000000000000000000000000000000)) {
+                y := shr(128, y)
+                z := shl(64, z)
+            }
+            if iszero(lt(y, 0x10000000000000000)) {
+                y := shr(64, y)
+                z := shl(32, z)
+            }
+            if iszero(lt(y, 0x100000000)) {
+                y := shr(32, y)
+                z := shl(16, z)
+            }
+            if iszero(lt(y, 0x10000)) {
+                y := shr(16, y)
+                z := shl(8, z)
+            }
+            if iszero(lt(y, 0x100)) {
+                y := shr(8, y)
+                z := shl(4, z)
+            }
+            if iszero(lt(y, 0x10)) {
+                y := shr(4, y)
+                z := shl(2, z)
+            }
+            if iszero(lt(y, 0x8)) { z := shl(1, z) }
+            // Refine twice (sufficient for uint256).
+            z := shr(1, add(z, div(x, z)))
+            z := shr(1, add(z, div(x, z)))
+            z := shr(1, add(z, div(x, z)))
+            z := shr(1, add(z, div(x, z)))
+            z := shr(1, add(z, div(x, z)))
+            z := shr(1, add(z, div(x, z)))
+            z := shr(1, add(z, div(x, z)))
+            // Floor: ensure z^2 <= x
+            if gt(z, div(x, z)) { z := div(x, z) }
+        }
     }
 
     /// @dev Stub: real implementation removes a proportional slice of
     ///      every position via `modifyLiquidity` with negative liquidity
     ///      delta, takes both currencies, and transfers to `payload.to`.
-    function _handleWithdraw(WithdrawPayload memory /*payload*/ ) internal pure returns (bytes memory) {
+    function _handleWithdraw(
+        WithdrawPayload memory /*payload*/
+    )
+        internal
+        pure
+        returns (bytes memory)
+    {
         revert Errors.UnknownOp();
     }
 
@@ -333,7 +562,13 @@ contract Vault is IVault, ERC20, IUnlockCallback {
     ///      shape, deploys via modifyLiquidity per target, settles
     ///      deltas, and mints the keeper bonus shares (ADR-007 §keeper
     ///      economics).
-    function _handleRebalance(RebalancePayload memory /*payload*/ ) internal pure returns (bytes memory) {
+    function _handleRebalance(
+        RebalancePayload memory /*payload*/
+    )
+        internal
+        pure
+        returns (bytes memory)
+    {
         revert Errors.UnknownOp();
     }
 
