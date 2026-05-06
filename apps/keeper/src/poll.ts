@@ -48,6 +48,9 @@ export interface PollDeps {
   /// this at startup and exposes a snapshot via /metrics. When omitted
   /// the loop runs metric-free — keeps unit tests trivial.
   metrics?: Metrics;
+  /// Chain object forwarded to writeContract during submission. Without
+  /// it viem v2 emits a tx with no chainId — see SubmitDeps.chain.
+  chain?: unknown;
 }
 
 /// One pass of the keeper poll loop.
@@ -153,6 +156,7 @@ async function evaluateVault(deps: EvaluateOne): Promise<VaultEvaluation> {
     maxFeePerGasCap: deps.maxFeePerGasCap,
     attemptTimeoutMs: deps.txAttemptTimeoutMs,
     maxAttempts: deps.maxSubmitAttempts,
+    chain: deps.chain,
   });
   if (submission.status === "confirmed") {
     logger.info(
