@@ -96,7 +96,21 @@ export async function submitRebalance(deps: SubmitDeps): Promise<SubmitResult> {
       });
     } catch (err) {
       lastError = errMsg(err);
-      logger.warn({vault, attempt, err: lastError}, "rebalance submission threw");
+      // Surface the full viem error shape — stack, .cause, request body —
+      // to make Alchemy 'JSON is not a valid request object' debuggable
+      // without local repro.
+      const fullErr =
+        typeof err === "object" && err !== null
+          ? {
+              name: (err as {name?: string}).name,
+              shortMessage: (err as {shortMessage?: string}).shortMessage,
+              message: (err as {message?: string}).message,
+              details: (err as {details?: string}).details,
+              metaMessages: (err as {metaMessages?: string[]}).metaMessages,
+              cause: (err as {cause?: {message?: string}}).cause?.message,
+            }
+          : String(err);
+      logger.warn({vault, attempt, err: fullErr}, "rebalance submission threw");
       // Network/account error — break rather than spam retries.
       return {status: "failed", reason: lastError, attempts: attempt + 1};
     }
