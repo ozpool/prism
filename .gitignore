@@ -42,3 +42,4 @@ Thumbs.db
 # Coverage
 coverage/
 lcov.info
+.vercel
