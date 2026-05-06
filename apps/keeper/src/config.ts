@@ -4,7 +4,8 @@ const envSchema = z.object({
   BASE_SEPOLIA_RPC_URL: z.string().url(),
   KEEPER_PRIVATE_KEY: z
     .string()
-    .regex(/^0x[a-fA-F0-9]{64}$/, "KEEPER_PRIVATE_KEY must be 0x-prefixed 32-byte hex"),
+    .regex(/^(0x)?[a-fA-F0-9]{64}$/, "KEEPER_PRIVATE_KEY must be 32-byte hex (0x prefix optional)")
+    .transform((v) => (v.startsWith("0x") ? v : `0x${v}`)),
   VAULT_FACTORY_ADDRESS: z
     .string()
     .regex(/^0x[a-fA-F0-9]{40}$/, "VAULT_FACTORY_ADDRESS must be a 0x-prefixed address"),
