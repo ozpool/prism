@@ -543,17 +543,85 @@ contract Vault is IVault, ERC20, IUnlockCallback {
         }
     }
 
-    /// @dev Stub: real implementation removes a proportional slice of
-    ///      every position via `modifyLiquidity` with negative liquidity
-    ///      delta, takes both currencies, and transfers to `payload.to`.
-    function _handleWithdraw(
-        WithdrawPayload memory /*payload*/
-    )
-        internal
-        pure
-        returns (bytes memory)
-    {
-        revert Errors.UnknownOp();
+    /// @notice Implements the withdraw hot-path inside the PoolManager unlock context.
+    /// @dev Execution flow:
+    ///   1. Reconstruct the pre-burn supply (vault burned `payload.shares`
+    ///      before unlock; current totalSupply() is post-burn).
+    ///   2. Per stored position: compute pro-rata liquidity to remove,
+    ///      modifyLiquidity with negative delta, accumulate caller deltas,
+    ///      decrement persisted liquidity.
+    ///   3. Compute pro-rata claim on idle vault balance (fees / dust).
+    ///   4. Slippage guard against the total amount the user receives.
+    ///   5. Take currencies from PoolManager directly to `payload.to`.
+    ///   6. Transfer idle pro-rata share to `payload.to`.
+    ///   7. Return ABI-encoded (amount0, amount1).
+    ///
+    /// Pro-rata math: `liquidityToRemove = position.liquidity * shares / preSupply`,
+    /// floor-rounded so dust always favours the remaining shareholders. The
+    /// MIN_SHARES burn permanently parked at DEAD is part of preSupply, so the
+    /// last redeemable user can never withdraw the full underlying — a tiny
+    /// sliver stays attributable to DEAD (the inflation guard).
+    function _handleWithdraw(WithdrawPayload memory payload) internal returns (bytes memory) {
+        // ── 1. Pre-burn supply ───────────────────────────────────────────────
+        uint256 preSupply = totalSupply() + payload.shares;
+
+        // ── 2. Remove pro-rata slice of every position ───────────────────────
+        int256 totalDelta0;
+        int256 totalDelta1;
+        uint256 nPos = _positions.length;
+        for (uint256 i; i < nPos; ++i) {
+            Position storage p = _positions[i];
+            // Floor — dust accrues to remaining shareholders.
+            uint128 liquidityToRemove = uint128(FullMath.mulDiv(uint256(p.liquidity), payload.shares, preSupply));
+            if (liquidityToRemove == 0) continue;
+
+            (BalanceDelta callerDelta,) = poolManager.modifyLiquidity(
+                _poolKey,
+                ModifyLiquidityParams({
+                    tickLower: p.tickLower,
+                    tickUpper: p.tickUpper,
+                    liquidityDelta: -int256(uint256(liquidityToRemove)),
+                    salt: bytes32(i)
+                }),
+                ""
+            );
+
+            totalDelta0 += callerDelta.amount0();
+            totalDelta1 += callerDelta.amount1();
+
+            p.liquidity -= liquidityToRemove;
+        }
+
+        // Negative delta would mean caller owes — impossible for a pure
+        // remove. Treat as zero rather than reverting on accumulated dust.
+        uint256 fromPositions0 = totalDelta0 > 0 ? uint256(totalDelta0) : 0;
+        uint256 fromPositions1 = totalDelta1 > 0 ? uint256(totalDelta1) : 0;
+
+        // ── 3. Pro-rata share of idle balance (fees / refund dust) ───────────
+        uint256 idle0 = token0.balanceOf(address(this));
+        uint256 idle1 = token1.balanceOf(address(this));
+        uint256 idleShare0 = FullMath.mulDiv(idle0, payload.shares, preSupply);
+        uint256 idleShare1 = FullMath.mulDiv(idle1, payload.shares, preSupply);
+
+        // ── 4. Slippage guard against total payout ───────────────────────────
+        uint256 amount0 = fromPositions0 + idleShare0;
+        uint256 amount1 = fromPositions1 + idleShare1;
+        if (amount0 < payload.amount0Min) revert Errors.SlippageExceeded(amount0, payload.amount0Min);
+        if (amount1 < payload.amount1Min) revert Errors.SlippageExceeded(amount1, payload.amount1Min);
+
+        // ── 5. Take currencies directly to recipient ─────────────────────────
+        if (fromPositions0 > 0) {
+            poolManager.take(_poolKey.currency0, payload.to, fromPositions0);
+        }
+        if (fromPositions1 > 0) {
+            poolManager.take(_poolKey.currency1, payload.to, fromPositions1);
+        }
+
+        // ── 6. Transfer idle pro-rata share to recipient ─────────────────────
+        if (idleShare0 > 0) token0.safeTransfer(payload.to, idleShare0);
+        if (idleShare1 > 0) token1.safeTransfer(payload.to, idleShare1);
+
+        return abi.encode(amount0, amount1);
     }
 
     /// @dev Stub: real implementation removes all positions, optionally
