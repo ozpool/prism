@@ -40,7 +40,12 @@ contract MEVLibTest is Test {
 
     function test_deviationBps_revertsOnZeroOracle() public {
         vm.expectRevert(Errors.MathOverflow.selector);
-        MEVLib.deviationBps(1 << 96, 0);
+        this.callDeviationBps(1 << 96, 0);
+    }
+
+    /// @dev External wrapper so vm.expectRevert sees a lower call depth.
+    function callDeviationBps(uint160 pool, uint160 oracle) external pure returns (uint256) {
+        return MEVLib.deviationBps(pool, oracle);
     }
 
     function testFuzz_deviationBps_neverReverts(uint160 pool, uint160 oracle) public pure {

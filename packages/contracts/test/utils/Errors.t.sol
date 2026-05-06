@@ -116,41 +116,42 @@ contract ErrorsTest is Test {
 
     function test_revertShape_SlippageExceeded() external {
         vm.expectRevert(abi.encodeWithSelector(Errors.SlippageExceeded.selector, uint256(99), uint256(100)));
-        _throwSlippage(99, 100);
+        this.throwSlippage(99, 100);
     }
 
     function test_revertShape_WeightsDoNotSum(uint256 actual) external {
         vm.expectRevert(abi.encodeWithSelector(Errors.WeightsDoNotSum.selector, actual));
-        _throwWeights(actual);
+        this.throwWeights(actual);
     }
 
     function test_revertShape_HookNotPermissioned(uint160 expected, uint160 actual) external {
         vm.expectRevert(abi.encodeWithSelector(Errors.HookNotPermissioned.selector, expected, actual));
-        _throwHook(expected, actual);
+        this.throwHook(expected, actual);
     }
 
     function test_revertShape_DepositsPaused() external {
         vm.expectRevert(Errors.DepositsPaused.selector);
-        _throwPaused();
+        this.throwPaused();
     }
 
     // -------------------------------------------------------------------------
-    // Throwers — kept tiny so the tests stay focused on the library itself
+    // Throwers — `external` so vm.expectRevert sees the revert at a lower
+    // call depth than the cheatcode (newer Foundry semantics).
     // -------------------------------------------------------------------------
 
-    function _throwSlippage(uint256 actual, uint256 min) internal pure {
+    function throwSlippage(uint256 actual, uint256 min) external pure {
         revert Errors.SlippageExceeded(actual, min);
     }
 
-    function _throwWeights(uint256 actual) internal pure {
+    function throwWeights(uint256 actual) external pure {
         revert Errors.WeightsDoNotSum(actual);
     }
 
-    function _throwHook(uint160 expected, uint160 actual) internal pure {
+    function throwHook(uint160 expected, uint160 actual) external pure {
         revert Errors.HookNotPermissioned(expected, actual);
     }
 
-    function _throwPaused() internal pure {
+    function throwPaused() external pure {
         revert Errors.DepositsPaused();
     }
 }
