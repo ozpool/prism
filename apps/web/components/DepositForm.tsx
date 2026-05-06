@@ -104,21 +104,28 @@ export function DepositForm({vaultAddress, token0, token1, defaultSlippageBps = 
   const needsApproval1 = amount1Desired > allowance1 && amount1Desired > 0n;
   const allowancesOk = !needsApproval0 && !needsApproval1;
 
-  const amount0Min = applySlippage(amount0Desired, slippageBps);
-  const amount1Min = applySlippage(amount1Desired, slippageBps);
-
-  // Pre-flight simulate the deposit only when allowances cover the
-  // intended amounts — running it earlier would always revert with
-  // ERC-20 transfer failure noise and obscure real reverts.
+  // Pre-flight simulate with min=0,0 to discover what the strategy
+  // actually consumes. PRISM only consumes 30–60% of desired by
+  // design; the contract checks slippage against `amount0Used`, not
+  // `amount0Desired`, so naïve min = 0.995 * desired rejects every
+  // valid deposit. Re-derive min from the simulated used amounts at
+  // submit time below.
   const simulate = useSimulateContract({
     address: vaultAddress,
     abi: VaultAbi,
     functionName: "deposit",
     args: account
-      ? [amount0Desired, amount1Desired, amount0Min, amount1Min, account]
+      ? [amount0Desired, amount1Desired, 0n, 0n, account]
       : undefined,
     query: {enabled: inputsValid && allowancesOk && !placeholderVault},
   });
+
+  // Vault.deposit returns (shares, amount0Used, amount1Used).
+  const simulatedResult = simulate.data?.result as readonly [bigint, bigint, bigint] | undefined;
+  const amount0Used = simulatedResult?.[1] ?? 0n;
+  const amount1Used = simulatedResult?.[2] ?? 0n;
+  const amount0Min = applySlippage(amount0Used, slippageBps);
+  const amount1Min = applySlippage(amount1Used, slippageBps);
 
   const {writeContractAsync: writeApprove, data: approveHash} = useWriteContract();
   const {writeContractAsync: writeDeposit, data: depositHash} = useWriteContract();
@@ -190,7 +197,15 @@ export function DepositForm({vaultAddress, token0, token1, defaultSlippageBps = 
 
     setStatus({kind: "awaiting-submit"});
     try {
-      const hash = await writeDeposit(simulate.data.request);
+      // Submit with min derived from simulated `amount0Used` /
+      // `amount1Used`, not the simulate's request (which carries
+      // min=0,0). This is the actual slippage protection.
+      const hash = await writeDeposit({
+        address: vaultAddress,
+        abi: VaultAbi,
+        functionName: "deposit",
+        args: [amount0Desired, amount1Desired, amount0Min, amount1Min, account],
+      });
       setStatus({kind: "pending", hash});
     } catch (err) {
       const e = classifyTxError(err);
@@ -221,6 +236,17 @@ export function DepositForm({vaultAddress, token0, token1, defaultSlippageBps = 
           insufficient={insufficient1}
           disabled={isBusy(status) || placeholderVault}
         />
+
+        {simulate.status === "success" && (amount0Used > 0n || amount1Used > 0n) ? (
+          <UsagePreview
+            token0={token0}
+            token1={token1}
+            amount0Desired={amount0Desired}
+            amount1Desired={amount1Desired}
+            amount0Used={amount0Used}
+            amount1Used={amount1Used}
+          />
+        ) : null}
 
         <SlippageRow value={slippageBps} onChange={setSlippageBps} disabled={isBusy(status)} />
 
@@ -298,6 +324,47 @@ function AmountInput({
         <span className="text-xs text-danger">Exceeds balance.</span>
       ) : null}
     </label>
+  );
+}
+
+function UsagePreview({
+  token0,
+  token1,
+  amount0Desired,
+  amount1Desired,
+  amount0Used,
+  amount1Used,
+}: {
+  token0: DepositFormToken;
+  token1: DepositFormToken;
+  amount0Desired: bigint;
+  amount1Desired: bigint;
+  amount0Used: bigint;
+  amount1Used: bigint;
+}) {
+  const refund0 = amount0Desired > amount0Used ? amount0Desired - amount0Used : 0n;
+  const refund1 = amount1Desired > amount1Used ? amount1Desired - amount1Used : 0n;
+  return (
+    <div className="rounded-lg border border-border bg-surface-raised px-3 py-2 text-xs text-text-muted">
+      <div className="mb-1 flex items-center justify-between">
+        <span>Will be deployed</span>
+        <span className="font-mono text-text">
+          {formatUnits(amount0Used, token0.decimals)} {token0.symbol}
+          {" + "}
+          {formatUnits(amount1Used, token1.decimals)} {token1.symbol}
+        </span>
+      </div>
+      {(refund0 > 0n || refund1 > 0n) ? (
+        <div className="flex items-center justify-between text-text-faint">
+          <span>Refund</span>
+          <span className="font-mono">
+            {formatUnits(refund0, token0.decimals)} {token0.symbol}
+            {" + "}
+            {formatUnits(refund1, token1.decimals)} {token1.symbol}
+          </span>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
