@@ -1,0 +1,78 @@
+name: keeper-cron
+
+# Production keeper for PRISM, hosted on GitHub Actions in lieu of a
+# 24/7 server. Runs the keeper in --once mode every minute (the GitHub
+# Actions cron minimum). One-minute polling is plenty for PRISM's drift
+# threshold; the queue may delay a run by a few minutes during peak
+# Actions load — that's an acceptable trade against $0 hosting.
+#
+# Required repo secrets:
+#   - BASE_SEPOLIA_RPC_URL
+#   - KEEPER_PRIVATE_KEY     (a fresh wallet, NOT the deployer)
+#   - VAULT_FACTORY_ADDRESS
+#   - POOL_MANAGER_ADDRESS
+# Optional:
+#   - SENTRY_DSN
+#
+# `workflow_dispatch` lets you trigger an out-of-cycle run from the
+# Actions UI when debugging.
+
+on:
+  schedule:
+    - cron: "* * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Serialize cron runs of this workflow on main so a slow cycle (e.g.
+  # tx submission waiting on a block) cannot overlap with the next one
+  # and double-submit. `cancel-in-progress: false` means the in-flight
+  # run finishes; the next scheduled run is just queued behind it.
+  group: keeper-cron-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "20"
+  PNPM_VERSION: "10.18.0"
+
+jobs:
+  cycle:
+    name: keeper one-shot cycle
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run keeper cycle
+        env:
+          BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+          KEEPER_PRIVATE_KEY: ${{ secrets.KEEPER_PRIVATE_KEY }}
+          VAULT_FACTORY_ADDRESS: ${{ secrets.VAULT_FACTORY_ADDRESS }}
+          POOL_MANAGER_ADDRESS: ${{ secrets.POOL_MANAGER_ADDRESS }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          POLL_INTERVAL_MS: "30000"
+          MAX_GAS_PRICE_GWEI: "10"
+          HEALTH_PORT: "8080"
+          LOG_LEVEL: "info"
+          NODE_ENV: "production"
+          RUN_ONCE: "1"
+        run: pnpm --filter @prism/keeper start

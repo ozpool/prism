@@ -190,60 +190,67 @@ function errMsg(err: unknown): string {
   return String(err);
 }
 
+/// Run a single poll cycle: evaluate every vault, submit any due
+/// rebalances, record metrics. Always resolves — internal errors are
+/// logged + counted as a failed cycle but do not throw. The boolean
+/// return is used by the cron one-shot wrapper to decide its exit code:
+/// `true` on success, `false` if the cycle itself raised.
+export async function runCycle(deps: PollDeps): Promise<boolean> {
+  const {logger, metrics} = deps;
+  const cycleId = Date.now().toString(36);
+  const cycleLogger = logger.child({cycle: cycleId});
+  const start = Date.now();
+  try {
+    const evaluations = await evaluateVaults({...deps, logger: cycleLogger});
+    const dueCount = evaluations.filter((e) => e.shouldRebalance).length;
+    const submittableCount = evaluations.filter((e) => e.simulation?.ok === true).length;
+    const confirmedCount = evaluations.filter((e) => e.submission?.status === "confirmed").length;
+    const failedCount = evaluations.filter((e) => e.submission?.status === "failed").length;
+
+    if (metrics) {
+      for (const e of evaluations) {
+        if (e.simulation?.ok) metrics.rebalanceSimulated();
+        if (e.submission?.status === "confirmed") {
+          metrics.rebalanceSubmitted();
+          metrics.rebalanceConfirmed();
+        } else if (e.submission?.status === "failed") {
+          metrics.rebalanceSubmitted();
+          metrics.rebalanceFailed();
+        }
+      }
+      metrics.cycleCompleted(Date.now() - start);
+    }
+
+    cycleLogger.info(
+      {
+        vaultCount: evaluations.length,
+        dueCount,
+        submittableCount,
+        confirmedCount,
+        failedCount,
+        ms: Date.now() - start,
+      },
+      "poll cycle complete",
+    );
+    return true;
+  } catch (err) {
+    const ms = Date.now() - start;
+    if (metrics) metrics.cycleFailed(ms);
+    cycleLogger.error({err: errMsg(err), ms}, "poll cycle failed");
+    return false;
+  }
+}
+
 /// Run the poll loop forever with the configured cadence. Returns a
 /// stop function that resolves after the in-flight cycle completes.
 export function runPollLoop(deps: PollDeps & {intervalMs: number}): () => Promise<void> {
-  const {logger, intervalMs, metrics} = deps;
+  const {intervalMs} = deps;
   let stopped = false;
   let inflight: Promise<void> = Promise.resolve();
 
-  const tick = async (): Promise<void> => {
-    if (stopped) return;
-    const cycleId = Date.now().toString(36);
-    const cycleLogger = logger.child({cycle: cycleId});
-    const start = Date.now();
-    try {
-      const evaluations = await evaluateVaults({...deps, logger: cycleLogger});
-      const dueCount = evaluations.filter((e) => e.shouldRebalance).length;
-      const submittableCount = evaluations.filter((e) => e.simulation?.ok === true).length;
-      const confirmedCount = evaluations.filter((e) => e.submission?.status === "confirmed").length;
-      const failedCount = evaluations.filter((e) => e.submission?.status === "failed").length;
-
-      if (metrics) {
-        for (const e of evaluations) {
-          if (e.simulation?.ok) metrics.rebalanceSimulated();
-          if (e.submission?.status === "confirmed") {
-            metrics.rebalanceSubmitted();
-            metrics.rebalanceConfirmed();
-          } else if (e.submission?.status === "failed") {
-            metrics.rebalanceSubmitted();
-            metrics.rebalanceFailed();
-          }
-        }
-        metrics.cycleCompleted(Date.now() - start);
-      }
-
-      cycleLogger.info(
-        {
-          vaultCount: evaluations.length,
-          dueCount,
-          submittableCount,
-          confirmedCount,
-          failedCount,
-          ms: Date.now() - start,
-        },
-        "poll cycle complete",
-      );
-    } catch (err) {
-      const ms = Date.now() - start;
-      if (metrics) metrics.cycleFailed(ms);
-      cycleLogger.error({err: errMsg(err), ms}, "poll cycle failed");
-    }
-  };
-
   const schedule = (): void => {
     if (stopped) return;
-    inflight = tick().finally(() => {
+    inflight = runCycle(deps).then(() => {
       if (!stopped) setTimeout(schedule, intervalMs);
     });
   };
