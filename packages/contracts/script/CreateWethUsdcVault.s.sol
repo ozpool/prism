@@ -2,8 +2,8 @@
 pragma solidity 0.8.26;
 
 import {Script, console} from "forge-std/Script.sol";
-import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {IHooks} from "v4-core/interfaces/IHooks.sol";
+import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {Currency} from "v4-core/types/Currency.sol";
 import {PoolKey} from "v4-core/types/PoolKey.sol";
 
@@ -51,7 +51,7 @@ contract CreateWethUsdcVault is Script {
     /// This is the encoded value below. If WETH < USDC numerically (it is —
     /// 0x4200... > 0x036C... so USDC sorts first), this assignment matches
     /// the sorted PoolKey.
-    uint160 internal constant SQRT_PRICE_X96_USDC_WETH = 1446501726624999858175504384000;
+    uint160 internal constant SQRT_PRICE_X96_USDC_WETH = 1_446_501_726_624_999_858_175_504_384_000;
 
     function run() external returns (address vault, address token0, address token1) {
         uint256 deployerKey = vm.envUint("DEPLOYER_PRIVATE_KEY");

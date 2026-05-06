@@ -20,7 +20,7 @@ permissions:
 env:
   FOUNDRY_VERSION: nightly-de33b6af53005037b463318d2628b5cfcaf39916
   SLITHER_VERSION: 0.10.4
-  ADERYN_VERSION: v0.5.4
+  ADERYN_VERSION: 0.5.4
   PYTHON_VERSION: "3.12"
 
 concurrency:
