@@ -59,9 +59,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: packages/contracts/lib
-          key: lib-${{ runner.os }}-${{ hashFiles('.gitmodules') }}
-          restore-keys: |
-            lib-${{ runner.os }}-
+          # Include the workflow itself in the key so a FOUNDRY_VERSION
+          # bump (or any toolchain change) invalidates a stale lib/ that
+          # would otherwise overwrite freshly-checked-out submodules.
+          # Exact-match only (no `restore-keys` fallback) — partial-match
+          # restore was the source of the long-running stale-forge-std bug.
+          key: lib-${{ runner.os }}-${{ hashFiles('.gitmodules', '.github/workflows/contracts.yml') }}
 
       - name: forge --version
         run: forge --version
@@ -114,9 +117,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: packages/contracts/lib
-          key: lib-${{ runner.os }}-${{ hashFiles('.gitmodules') }}
-          restore-keys: |
-            lib-${{ runner.os }}-
+          # Include the workflow itself in the key so a FOUNDRY_VERSION
+          # bump (or any toolchain change) invalidates a stale lib/ that
+          # would otherwise overwrite freshly-checked-out submodules.
+          # Exact-match only (no `restore-keys` fallback) — partial-match
+          # restore was the source of the long-running stale-forge-std bug.
+          key: lib-${{ runner.os }}-${{ hashFiles('.gitmodules', '.github/workflows/contracts.yml') }}
 
       - name: forge build (Slither needs out/)
         run: forge build --build-info
@@ -159,9 +165,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: packages/contracts/lib
-          key: lib-${{ runner.os }}-${{ hashFiles('.gitmodules') }}
-          restore-keys: |
-            lib-${{ runner.os }}-
+          # Include the workflow itself in the key so a FOUNDRY_VERSION
+          # bump (or any toolchain change) invalidates a stale lib/ that
+          # would otherwise overwrite freshly-checked-out submodules.
+          # Exact-match only (no `restore-keys` fallback) — partial-match
+          # restore was the source of the long-running stale-forge-std bug.
+          key: lib-${{ runner.os }}-${{ hashFiles('.gitmodules', '.github/workflows/contracts.yml') }}
 
       - name: Install Aderyn
         run: cargo install aderyn --version ${{ env.ADERYN_VERSION }} --locked
