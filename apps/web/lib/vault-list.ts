@@ -1,4 +1,6 @@
-import type {Address} from "viem";
+import {createPublicClient, http, type Address} from "viem";
+import {baseSepolia} from "viem/chains";
+import {ADDRESSES, CHAIN_IDS} from "@prism/shared";
 
 /**
  * Vault list state — discriminated union per the design spec
@@ -40,16 +42,78 @@ export function formatBps(bps: number): string {
   return `${(bps / 100).toFixed(2)}%`;
 }
 
+const FACTORY_ABI = [
+  {
+    type: "function",
+    name: "allVaultsLength",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{name: "", type: "uint256"}],
+  },
+  {
+    type: "function",
+    name: "allVaults",
+    stateMutability: "view",
+    inputs: [{name: "i", type: "uint256"}],
+    outputs: [{name: "", type: "address"}],
+  },
+] as const;
+
+const VAULT_ABI = [
+  {type: "function", name: "name", stateMutability: "view", inputs: [], outputs: [{name: "", type: "string"}]},
+  {type: "function", name: "symbol", stateMutability: "view", inputs: [], outputs: [{name: "", type: "string"}]},
+  {type: "function", name: "totalSupply", stateMutability: "view", inputs: [], outputs: [{name: "", type: "uint256"}]},
+] as const;
+
 /**
- * Placeholder fetcher. M2 contracts (#31 VaultFactory) ship a registry;
- * until then the dApp returns empty so the UI exercises the empty state.
- *
- * Once #31 lands, this calls `factory.allVaults()` (or an indexer) and
- * fans out per-vault reads. Wired to TanStack Query in the page itself.
+ * Reads the live VaultFactory on Base Sepolia and returns one summary
+ * per registered vault. Until per-vault TVL/APR plumbing lands the
+ * card numbers are zeroed — the card still renders with its real
+ * pair name + symbol so users can click into the detail page.
  */
 export async function fetchVaultSummaries(): Promise<VaultSummary[]> {
-  // Simulate a brief network round-trip so the loading state appears
-  // long enough to read in dev. Replace with real reads in M2.
-  await new Promise((r) => setTimeout(r, 300));
-  return [];
+  const addrs = ADDRESSES[CHAIN_IDS.baseSepolia];
+  if (!addrs || addrs.vaultFactory === "0x0000000000000000000000000000000000000000") {
+    return [];
+  }
+
+  const rpcUrl = process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL;
+  const client = createPublicClient({
+    chain: baseSepolia,
+    transport: rpcUrl ? http(rpcUrl) : http(),
+  });
+
+  const length = (await client.readContract({
+    address: addrs.vaultFactory,
+    abi: FACTORY_ABI,
+    functionName: "allVaultsLength",
+  })) as bigint;
+
+  if (length === 0n) return [];
+
+  const vaults: VaultSummary[] = [];
+  for (let i = 0n; i < length; i++) {
+    const vaultAddr = (await client.readContract({
+      address: addrs.vaultFactory,
+      abi: FACTORY_ABI,
+      functionName: "allVaults",
+      args: [i],
+    })) as Address;
+
+    const [name, symbol] = await Promise.all([
+      client.readContract({address: vaultAddr, abi: VAULT_ABI, functionName: "name"}) as Promise<string>,
+      client.readContract({address: vaultAddr, abi: VAULT_ABI, functionName: "symbol"}) as Promise<string>,
+    ]);
+
+    vaults.push({
+      address: vaultAddr,
+      pairName: name,
+      versionLabel: `${symbol} · v1.0`,
+      tvlUsd: 0n,
+      apr24hBps: 0,
+      sharePriceUsd: 1_000_000n, // $1.00 placeholder until totals plumbing lands
+    });
+  }
+
+  return vaults;
 }

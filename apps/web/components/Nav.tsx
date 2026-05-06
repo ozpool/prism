@@ -4,7 +4,7 @@ import Link from "next/link";
 import {usePathname} from "next/navigation";
 
 const LINKS = [
-  {href: "/", label: "Vaults"},
+  {href: "/vaults", label: "Vaults"},
   {href: "/rebalances", label: "Rebalances"},
   {href: "/docs", label: "Docs"},
 ] as const;
@@ -15,7 +15,7 @@ export function Nav() {
     <nav aria-label="Primary" className="hidden md:block">
       <ul className="flex items-center gap-6 text-sm">
         {LINKS.map(({href, label}) => {
-          const active = pathname === href || (href !== "/" && pathname.startsWith(href));
+          const active = pathname === href || pathname.startsWith(`${href}/`);
           return (
             <li key={href}>
               <Link

@@ -12,10 +12,13 @@ const nextConfig = {
       // Porto wallet support is opt-in inside wagmi/connectors; we do
       // not ship that connector. Aliasing the optional peer to `false`
       // teaches webpack to silently skip it instead of erroring.
+      // Same trick for @metamask/sdk's optional react-native storage —
+      // we never run inside React Native.
       config.resolve.alias = {
         ...config.resolve.alias,
         "porto/internal": false,
         porto: false,
+        "@react-native-async-storage/async-storage": false,
       };
     }
 
