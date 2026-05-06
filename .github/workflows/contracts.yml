@@ -18,9 +18,9 @@ permissions:
 # Pinning toolchain versions in one place. Bump deliberately; avoid
 # floating ranges that drift CI behaviour out from under us.
 env:
-  FOUNDRY_VERSION: nightly-de33b6af53005037b463318d2628b5cfcaf39916
+  FOUNDRY_VERSION: nightly-5e88010a83d1b87b8f4d13058e42a2949d3e9dc0
   SLITHER_VERSION: 0.10.4
-  ADERYN_VERSION: v0.5.4
+  ADERYN_VERSION: 0.5.4
   PYTHON_VERSION: "3.12"
 
 concurrency:
@@ -59,9 +59,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: packages/contracts/lib
-          key: lib-${{ runner.os }}-${{ hashFiles('.gitmodules') }}
-          restore-keys: |
-            lib-${{ runner.os }}-
+          # Include the workflow itself in the key so a FOUNDRY_VERSION
+          # bump (or any toolchain change) invalidates a stale lib/ that
+          # would otherwise overwrite freshly-checked-out submodules.
+          # Exact-match only (no `restore-keys` fallback) — partial-match
+          # restore was the source of the long-running stale-forge-std bug.
+          key: lib-${{ runner.os }}-${{ hashFiles('.gitmodules', '.github/workflows/contracts.yml') }}
 
       - name: forge --version
         run: forge --version
@@ -114,9 +117,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: packages/contracts/lib
-          key: lib-${{ runner.os }}-${{ hashFiles('.gitmodules') }}
-          restore-keys: |
-            lib-${{ runner.os }}-
+          # Include the workflow itself in the key so a FOUNDRY_VERSION
+          # bump (or any toolchain change) invalidates a stale lib/ that
+          # would otherwise overwrite freshly-checked-out submodules.
+          # Exact-match only (no `restore-keys` fallback) — partial-match
+          # restore was the source of the long-running stale-forge-std bug.
+          key: lib-${{ runner.os }}-${{ hashFiles('.gitmodules', '.github/workflows/contracts.yml') }}
 
       - name: forge build (Slither needs out/)
         run: forge build --build-info
@@ -159,9 +165,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: packages/contracts/lib
-          key: lib-${{ runner.os }}-${{ hashFiles('.gitmodules') }}
-          restore-keys: |
-            lib-${{ runner.os }}-
+          # Include the workflow itself in the key so a FOUNDRY_VERSION
+          # bump (or any toolchain change) invalidates a stale lib/ that
+          # would otherwise overwrite freshly-checked-out submodules.
+          # Exact-match only (no `restore-keys` fallback) — partial-match
+          # restore was the source of the long-running stale-forge-std bug.
+          key: lib-${{ runner.os }}-${{ hashFiles('.gitmodules', '.github/workflows/contracts.yml') }}
 
       - name: Install Aderyn
         run: cargo install aderyn --version ${{ env.ADERYN_VERSION }} --locked

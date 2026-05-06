@@ -2,8 +2,8 @@
 pragma solidity 0.8.26;
 
 import {Script, console} from "forge-std/Script.sol";
-import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {IHooks} from "v4-core/interfaces/IHooks.sol";
+import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {Currency} from "v4-core/types/Currency.sol";
 import {PoolKey} from "v4-core/types/PoolKey.sol";
 
@@ -70,7 +70,7 @@ contract CreateVault is Script {
 
     // Initial pool price = 1.0 (token0 == token1 in real terms).
     // sqrt(1) * 2^96 = 79228162514264337593543950336.
-    uint160 internal constant SQRT_PRICE_X96_AT_1 = 79228162514264337593543950336;
+    uint160 internal constant SQRT_PRICE_X96_AT_1 = 79_228_162_514_264_337_593_543_950_336;
 
     function run() external returns (address vault, address token0, address token1) {
         uint256 deployerKey = vm.envUint("DEPLOYER_PRIVATE_KEY");

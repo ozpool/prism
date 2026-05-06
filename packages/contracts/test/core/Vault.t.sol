@@ -242,10 +242,10 @@ contract VaultStorageTest is Test {
     }
 
     function test_rebalance_revertsWhenStrategyGateClosed() public {
-        // Default-deployed BellStrategy mock returns false for
-        // shouldRebalance under all-quiet conditions, so the entry
-        // point reverts RebalanceNotNeeded before reaching unlock.
-        // Mock the strategy.shouldRebalance call to return false.
+        // The entry point reads slot0 from the pool manager (extsload)
+        // before the gate check, so we mock both the slot read and the
+        // shouldRebalance return.
+        vm.mockCall(POOL_MANAGER, abi.encodeWithSignature("extsload(bytes32)"), abi.encode(bytes32(0)));
         vm.mockCall(STRATEGY, abi.encodeWithSelector(IStrategy.shouldRebalance.selector), abi.encode(false));
         vm.expectRevert(Errors.RebalanceNotNeeded.selector);
         vault.rebalance();

@@ -104,36 +104,68 @@ export function DepositForm({vaultAddress, token0, token1, defaultSlippageBps = 
   const needsApproval1 = amount1Desired > allowance1 && amount1Desired > 0n;
   const allowancesOk = !needsApproval0 && !needsApproval1;
 
-  const amount0Min = applySlippage(amount0Desired, slippageBps);
-  const amount1Min = applySlippage(amount1Desired, slippageBps);
-
-  // Pre-flight simulate the deposit only when allowances cover the
-  // intended amounts — running it earlier would always revert with
-  // ERC-20 transfer failure noise and obscure real reverts.
+  // Pre-flight simulate with min=0,0 to discover what the strategy
+  // actually consumes. PRISM only consumes 30–60% of desired by
+  // design; the contract checks slippage against `amount0Used`, not
+  // `amount0Desired`, so naïve min = 0.995 * desired rejects every
+  // valid deposit. Re-derive min from the simulated used amounts at
+  // submit time below.
   const simulate = useSimulateContract({
     address: vaultAddress,
     abi: VaultAbi,
     functionName: "deposit",
     args: account
-      ? [amount0Desired, amount1Desired, amount0Min, amount1Min, account]
+      ? [amount0Desired, amount1Desired, 0n, 0n, account]
       : undefined,
     query: {enabled: inputsValid && allowancesOk && !placeholderVault},
   });
 
-  const {writeContractAsync: writeApprove, data: approveHash} = useWriteContract();
-  const {writeContractAsync: writeDeposit, data: depositHash} = useWriteContract();
+  // Vault.deposit returns (shares, amount0Used, amount1Used).
+  const simulatedResult = simulate.data?.result as readonly [bigint, bigint, bigint] | undefined;
+  const amount0Used = simulatedResult?.[1] ?? 0n;
+  const amount1Used = simulatedResult?.[2] ?? 0n;
+  const amount0Min = applySlippage(amount0Used, slippageBps);
+  const amount1Min = applySlippage(amount1Used, slippageBps);
+
+  // Fire-and-watch pattern: use the non-async writeContract (returns void)
+  // and watch the `data: hash` field for the broadcast hash. The async
+  // variant of useWriteContract has been observed to leave the promise
+  // unresolved after MetaMask actually signs + broadcasts, leaving the
+  // form stuck in "awaiting-submit" forever. Watching the hash + receipt
+  // bypasses that path entirely.
+  const {
+    writeContract: writeApprove,
+    data: approveHash,
+    error: approveError,
+    reset: resetApprove,
+  } = useWriteContract();
+  const {
+    writeContract: writeDeposit,
+    data: depositHash,
+    error: depositError,
+    reset: resetDeposit,
+  } = useWriteContract();
 
   const approveReceipt = useWaitForTransactionReceipt({hash: approveHash});
   const depositReceipt = useWaitForTransactionReceipt({hash: depositHash});
 
-  // Refresh allowances when an approval lands so the form transitions
-  // out of `awaiting-approval` automatically.
+  // Approve broadcast → "approving"; receipt → re-read allowances + advance.
+  useEffect(() => {
+    if (approveHash) setStatus({kind: "approving", token: token0.address, hash: approveHash});
+  }, [approveHash, token0.address]);
+
   useEffect(() => {
     if (approveReceipt.isSuccess) {
       void refetchTokenReads();
       setStatus({kind: "awaiting-submit"});
+      resetApprove();
     }
-  }, [approveReceipt.isSuccess, refetchTokenReads]);
+  }, [approveReceipt.isSuccess, refetchTokenReads, resetApprove]);
+
+  // Deposit broadcast → "pending"; receipt → "confirmed".
+  useEffect(() => {
+    if (depositHash) setStatus({kind: "pending", hash: depositHash});
+  }, [depositHash]);
 
   useEffect(() => {
     if (depositReceipt.isSuccess && depositHash) {
@@ -141,6 +173,15 @@ export function DepositForm({vaultAddress, token0, token1, defaultSlippageBps = 
       void refetchTokenReads();
     }
   }, [depositReceipt.isSuccess, depositHash, refetchTokenReads]);
+
+  // Surface wallet rejections / RPC errors back into the form.
+  useEffect(() => {
+    if (approveError) setStatus({kind: "failed", reason: classifyTxError(approveError).message});
+  }, [approveError]);
+
+  useEffect(() => {
+    if (depositError) setStatus({kind: "failed", reason: classifyTxError(depositError).message});
+  }, [depositError]);
 
   const insufficient0 = amount0Desired > balance0;
   const insufficient1 = amount1Desired > balance1;
@@ -153,35 +194,28 @@ export function DepositForm({vaultAddress, token0, token1, defaultSlippageBps = 
     (allowancesOk && simulate.status === "error") ||
     placeholderVault;
 
-  async function onApprove(token: DepositFormToken, amount: bigint) {
+  function onApprove(token: DepositFormToken, amount: bigint) {
     setStatus({kind: "awaiting-approval", token: token.address});
-    try {
-      const hash = await writeApprove({
-        address: token.address,
-        abi: erc20Abi,
-        functionName: "approve",
-        args: [vaultAddress, amount],
-      });
-      setStatus({kind: "approving", token: token.address, hash});
-    } catch (err) {
-      const e = classifyTxError(err);
-      setStatus({kind: "failed", reason: e.message});
-    }
+    writeApprove({
+      address: token.address,
+      abi: erc20Abi,
+      functionName: "approve",
+      args: [vaultAddress, amount],
+    });
   }
 
-  async function onDeposit() {
+  function onDeposit() {
     if (!account) return;
 
     if (needsApproval0) {
-      await onApprove(token0, amount0Desired);
+      onApprove(token0, amount0Desired);
       return;
     }
     if (needsApproval1) {
-      await onApprove(token1, amount1Desired);
+      onApprove(token1, amount1Desired);
       return;
     }
 
-    setStatus({kind: "simulating"});
     if (simulate.status !== "success") {
       const reason = simulate.error?.message ?? "Simulation did not produce a request.";
       setStatus({kind: "simulation-failed", reason});
@@ -189,13 +223,16 @@ export function DepositForm({vaultAddress, token0, token1, defaultSlippageBps = 
     }
 
     setStatus({kind: "awaiting-submit"});
-    try {
-      const hash = await writeDeposit(simulate.data.request);
-      setStatus({kind: "pending", hash});
-    } catch (err) {
-      const e = classifyTxError(err);
-      setStatus({kind: "failed", reason: e.message});
-    }
+    resetDeposit();
+    // Submit with min derived from simulated `amount0Used` / `amount1Used`,
+    // not the simulate's request (which carries min=0,0). This is the
+    // actual slippage protection.
+    writeDeposit({
+      address: vaultAddress,
+      abi: VaultAbi,
+      functionName: "deposit",
+      args: [amount0Desired, amount1Desired, amount0Min, amount1Min, account],
+    });
   }
 
   return (
@@ -222,11 +259,22 @@ export function DepositForm({vaultAddress, token0, token1, defaultSlippageBps = 
           disabled={isBusy(status) || placeholderVault}
         />
 
+        {simulate.status === "success" && (amount0Used > 0n || amount1Used > 0n) ? (
+          <UsagePreview
+            token0={token0}
+            token1={token1}
+            amount0Desired={amount0Desired}
+            amount1Desired={amount1Desired}
+            amount0Used={amount0Used}
+            amount1Used={amount1Used}
+          />
+        ) : null}
+
         <SlippageRow value={slippageBps} onChange={setSlippageBps} disabled={isBusy(status)} />
 
         <button
           type="button"
-          onClick={() => void onDeposit()}
+          onClick={onDeposit}
           disabled={submitDisabled}
           className="rounded-lg bg-accent px-4 py-3 text-sm font-medium text-canvas transition-base
                      hover:shadow-glow-violet disabled:cursor-not-allowed disabled:opacity-50
@@ -298,6 +346,47 @@ function AmountInput({
         <span className="text-xs text-danger">Exceeds balance.</span>
       ) : null}
     </label>
+  );
+}
+
+function UsagePreview({
+  token0,
+  token1,
+  amount0Desired,
+  amount1Desired,
+  amount0Used,
+  amount1Used,
+}: {
+  token0: DepositFormToken;
+  token1: DepositFormToken;
+  amount0Desired: bigint;
+  amount1Desired: bigint;
+  amount0Used: bigint;
+  amount1Used: bigint;
+}) {
+  const refund0 = amount0Desired > amount0Used ? amount0Desired - amount0Used : 0n;
+  const refund1 = amount1Desired > amount1Used ? amount1Desired - amount1Used : 0n;
+  return (
+    <div className="rounded-lg border border-border bg-surface-raised px-3 py-2 text-xs text-text-muted">
+      <div className="mb-1 flex items-center justify-between">
+        <span>Will be deployed</span>
+        <span className="font-mono text-text">
+          {formatUnits(amount0Used, token0.decimals)} {token0.symbol}
+          {" + "}
+          {formatUnits(amount1Used, token1.decimals)} {token1.symbol}
+        </span>
+      </div>
+      {(refund0 > 0n || refund1 > 0n) ? (
+        <div className="flex items-center justify-between text-text-faint">
+          <span>Refund</span>
+          <span className="font-mono">
+            {formatUnits(refund0, token0.decimals)} {token0.symbol}
+            {" + "}
+            {formatUnits(refund1, token1.decimals)} {token1.symbol}
+          </span>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

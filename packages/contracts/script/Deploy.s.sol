@@ -81,13 +81,12 @@ contract Deploy is Script {
         //    not the EOA that actually submits the tx. Hook ctor + the
         //    factory create2 see the broadcaster as msg.sender.
         address broadcaster = vm.addr(deployerKey);
-        address futureFactoryAddr = vm.computeCreateAddress(
-            broadcaster,
-            // nonce after hook deploy (hook is CREATE2 via Foundry's
-            // deployer, so does not bump broadcaster nonce; broadcaster
-            // currently holds nonces for BellStrategy + ChainlinkAdapter)
-            vm.getNonce(broadcaster) + 1
-        );
+        // nonce after hook deploy (hook is CREATE2 via Foundry's
+        // deployer, so does not bump broadcaster nonce; broadcaster
+        // currently holds nonces for BellStrategy + ChainlinkAdapter).
+        // Computed via inline RLP rather than vm.computeCreateAddress so
+        // older Foundry builds without the cheatcode still build.
+        address futureFactoryAddr = _computeCreateAddress(broadcaster, vm.getNonce(broadcaster) + 1);
 
         bytes32 hookSalt = _mineHookSalt(pm, futureFactoryAddr);
         bytes memory hookCode = abi.encodePacked(type(ProtocolHook).creationCode, abi.encode(pm, futureFactoryAddr));
@@ -125,12 +124,35 @@ contract Deploy is Script {
         bytes32 initCodeHash = keccak256(abi.encodePacked(type(ProtocolHook).creationCode, abi.encode(pm, factoryAddr)));
         for (uint256 i = 0; i < 200_000; i++) {
             bytes32 salt = bytes32(i);
-            address predicted =
-                address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), CREATE2_DEPLOYER, salt, initCodeHash)))));
+            address predicted = address(
+                uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), CREATE2_DEPLOYER, salt, initCodeHash))))
+            );
             if (uint160(predicted) & 0x3FFF == 0x05C0) {
                 return salt;
             }
         }
         revert("salt not found");
+    }
+
+    /// @dev RLP-encoded CREATE address derivation.
+    ///      Avoids vm.computeCreateAddress (cheatcode missing on older
+    ///      Foundry builds). Same algorithm as forge-std/StdUtils,
+    ///      adapted from solmate's LibRLP.
+    function _computeCreateAddress(address deployer, uint256 nonce) internal pure returns (address) {
+        bytes32 h;
+        if (nonce == 0x00) {
+            h = keccak256(abi.encodePacked(bytes1(0xd6), bytes1(0x94), deployer, bytes1(0x80)));
+        } else if (nonce <= 0x7f) {
+            h = keccak256(abi.encodePacked(bytes1(0xd6), bytes1(0x94), deployer, uint8(nonce)));
+        } else if (nonce <= 0xff) {
+            h = keccak256(abi.encodePacked(bytes1(0xd7), bytes1(0x94), deployer, bytes1(0x81), uint8(nonce)));
+        } else if (nonce <= 0xffff) {
+            h = keccak256(abi.encodePacked(bytes1(0xd8), bytes1(0x94), deployer, bytes1(0x82), uint16(nonce)));
+        } else if (nonce <= 0xffffff) {
+            h = keccak256(abi.encodePacked(bytes1(0xd9), bytes1(0x94), deployer, bytes1(0x83), uint24(nonce)));
+        } else {
+            h = keccak256(abi.encodePacked(bytes1(0xda), bytes1(0x94), deployer, bytes1(0x84), uint32(nonce)));
+        }
+        return address(uint160(uint256(h)));
     }
 }

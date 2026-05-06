@@ -37,22 +37,22 @@ contract PositionLibTest is Test {
 
     function test_validateRange_invertedReverts() external {
         vm.expectRevert(abi.encodeWithSelector(Errors.InvalidTickRange.selector, int24(60), int24(-60)));
-        PositionLib.validateRange(60, -60, SPACING_MED);
+        this.callValidateRange(60, -60, SPACING_MED);
     }
 
     function test_validateRange_zeroWidthReverts() external {
         vm.expectRevert(abi.encodeWithSelector(Errors.InvalidTickRange.selector, int24(60), int24(60)));
-        PositionLib.validateRange(60, 60, SPACING_MED);
+        this.callValidateRange(60, 60, SPACING_MED);
     }
 
     function test_validateRange_misalignedLowerReverts() external {
         vm.expectRevert(abi.encodeWithSelector(Errors.InvalidTickRange.selector, int24(57), int24(60)));
-        PositionLib.validateRange(57, 60, SPACING_MED);
+        this.callValidateRange(57, 60, SPACING_MED);
     }
 
     function test_validateRange_misalignedUpperReverts() external {
         vm.expectRevert(abi.encodeWithSelector(Errors.InvalidTickRange.selector, int24(60), int24(73)));
-        PositionLib.validateRange(60, 73, SPACING_MED);
+        this.callValidateRange(60, 73, SPACING_MED);
     }
 
     function test_validateRange_belowMinUsableReverts() external {
@@ -60,14 +60,20 @@ contract PositionLibTest is Test {
         // One spacing past the boundary is not usable.
         int24 below = minU - SPACING_MED;
         vm.expectRevert(abi.encodeWithSelector(Errors.InvalidTickRange.selector, below, int24(0)));
-        PositionLib.validateRange(below, 0, SPACING_MED);
+        this.callValidateRange(below, 0, SPACING_MED);
     }
 
     function test_validateRange_aboveMaxUsableReverts() external {
         int24 maxU = TickMath.maxUsableTick(SPACING_MED);
         int24 above = maxU + SPACING_MED;
         vm.expectRevert(abi.encodeWithSelector(Errors.InvalidTickRange.selector, int24(0), above));
-        PositionLib.validateRange(0, above, SPACING_MED);
+        this.callValidateRange(0, above, SPACING_MED);
+    }
+
+    /// @dev External wrapper so `vm.expectRevert` sees the revert at a lower
+    ///      call depth than the cheatcode itself (newer Foundry semantics).
+    function callValidateRange(int24 lower, int24 upper, int24 spacing) external pure {
+        PositionLib.validateRange(lower, upper, spacing);
     }
 
     // -------------------------------------------------------------------------

@@ -2,8 +2,10 @@
 
 import {notFound} from "next/navigation";
 import {useMemo} from "react";
-import {isAddress, zeroAddress, type Address} from "viem";
+import {erc20Abi, isAddress, zeroAddress, type Address} from "viem";
+import {useReadContracts} from "wagmi";
 
+import {VaultAbi} from "@prism/shared";
 import {DepositForm} from "@/components/DepositForm";
 import {PrismVisual, type PrismPosition} from "@/components/PrismVisual";
 import {WithdrawForm} from "@/components/WithdrawForm";
@@ -148,30 +150,69 @@ interface PlaceholderDetail {
   token1: PlaceholderToken;
 }
 
+interface PoolKeyOnChain {
+  currency0: Address;
+  currency1: Address;
+  fee: number;
+  tickSpacing: number;
+  hooks: Address;
+}
+
 function usePlaceholderVault(address: string): PlaceholderDetail {
+  // Read poolKey + name from the vault. Token symbol/decimals come from
+  // the ERC-20s themselves (read in a second batch, gated on the first).
+  const isReal = isAddress(address) && address !== zeroAddress;
+  const vaultAddr = isReal ? (address as Address) : zeroAddress;
+
+  const {data: vaultReads} = useReadContracts({
+    contracts: [
+      {address: vaultAddr, abi: VaultAbi, functionName: "poolKey"},
+      {address: vaultAddr, abi: erc20Abi, functionName: "name"},
+    ],
+    query: {enabled: isReal},
+  });
+
+  const poolKey = vaultReads?.[0]?.result as PoolKeyOnChain | undefined;
+  const name = (vaultReads?.[1]?.result as string | undefined) ?? "";
+  const token0Addr = poolKey?.currency0 ?? zeroAddress;
+  const token1Addr = poolKey?.currency1 ?? zeroAddress;
+
+  // Resolve symbol + decimals for both tokens once we know their addresses.
+  const {data: tokenReads} = useReadContracts({
+    contracts: [
+      {address: token0Addr, abi: erc20Abi, functionName: "symbol"},
+      {address: token0Addr, abi: erc20Abi, functionName: "decimals"},
+      {address: token1Addr, abi: erc20Abi, functionName: "symbol"},
+      {address: token1Addr, abi: erc20Abi, functionName: "decimals"},
+    ],
+    query: {enabled: !!poolKey && token0Addr !== zeroAddress && token1Addr !== zeroAddress},
+  });
+
+  const sym0 = (tokenReads?.[0]?.result as string | undefined) ?? "T0";
+  const dec0 = (tokenReads?.[1]?.result as number | undefined) ?? 18;
+  const sym1 = (tokenReads?.[2]?.result as string | undefined) ?? "T1";
+  const dec1 = (tokenReads?.[3]?.result as number | undefined) ?? 18;
+
   return useMemo(
     () => ({
       address,
-      pairName: "WETH / USDC",
+      pairName: name || `${sym0} / ${sym1}`,
       versionLabel: "v1",
       tvlUsd: 0n,
       apr24hBps: 0,
-      sharePriceUsd: 1_000_000n, // 1.000000 USDC (6 decimals)
-      // Placeholder shape — three positions either side of tick 0,
-      // weighted to draw a recognisable bell. Real values land with
-      // #31 (VaultFactory) + getTotalAmounts wire-up in M2.
+      sharePriceUsd: 1_000_000n,
+      // Placeholder bell-curve render until getTotalAmounts wiring ships;
+      // the chart is illustrative, not real position state.
       positions: [
         {tickLower: -1200, tickUpper: -600, liquidity: 4_000_000n, token0: 0n, token1: 0n},
         {tickLower: -600, tickUpper: 600, liquidity: 10_000_000n, token0: 0n, token1: 0n},
         {tickLower: 600, tickUpper: 1200, liquidity: 4_000_000n, token0: 0n, token1: 0n},
       ],
       currentTick: 0,
-      tickSpacing: 60,
-      // Token metadata is fixed for the placeholder vault; real values
-      // come from the data layer once #31 (VaultFactory) lands.
-      token0: {address: zeroAddress, symbol: "WETH", decimals: 18},
-      token1: {address: zeroAddress, symbol: "USDC", decimals: 6},
+      tickSpacing: poolKey?.tickSpacing ?? 60,
+      token0: {address: token0Addr, symbol: sym0, decimals: dec0},
+      token1: {address: token1Addr, symbol: sym1, decimals: dec1},
     }),
-    [address],
+    [address, name, sym0, sym1, dec0, dec1, token0Addr, token1Addr, poolKey?.tickSpacing],
   );
 }

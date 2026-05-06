@@ -98,8 +98,19 @@ export function WithdrawForm({
     query: {enabled: inputsValid && !placeholderVault},
   });
 
-  const {writeContractAsync: writeWithdraw, data: withdrawHash} = useWriteContract();
+  // Fire-and-watch: see DepositForm for rationale (the async variant
+  // can stall after a successful broadcast).
+  const {
+    writeContract: writeWithdraw,
+    data: withdrawHash,
+    error: withdrawError,
+    reset: resetWithdraw,
+  } = useWriteContract();
   const withdrawReceipt = useWaitForTransactionReceipt({hash: withdrawHash});
+
+  useEffect(() => {
+    if (withdrawHash) setStatus({kind: "pending", hash: withdrawHash});
+  }, [withdrawHash]);
 
   useEffect(() => {
     if (withdrawReceipt.isSuccess && withdrawHash) {
@@ -109,28 +120,26 @@ export function WithdrawForm({
     }
   }, [withdrawReceipt.isSuccess, withdrawHash, refetchReads]);
 
+  useEffect(() => {
+    if (withdrawError) setStatus({kind: "failed", reason: classifyTxError(withdrawError).message});
+  }, [withdrawError]);
+
   const submitDisabled =
     !inputsValid ||
     isBusy(status) ||
     simulate.status === "error" ||
     placeholderVault;
 
-  async function onWithdraw() {
+  function onWithdraw() {
     if (!account) return;
-    setStatus({kind: "simulating"});
     if (simulate.status !== "success") {
       const reason = simulate.error?.message ?? "Simulation did not produce a request.";
       setStatus({kind: "simulation-failed", reason});
       return;
     }
     setStatus({kind: "awaiting-submit"});
-    try {
-      const hash = await writeWithdraw(simulate.data.request);
-      setStatus({kind: "pending", hash});
-    } catch (err) {
-      const e = classifyTxError(err);
-      setStatus({kind: "failed", reason: e.message});
-    }
+    resetWithdraw();
+    writeWithdraw(simulate.data.request);
   }
 
   return (
@@ -159,7 +168,7 @@ export function WithdrawForm({
 
         <button
           type="button"
-          onClick={() => void onWithdraw()}
+          onClick={onWithdraw}
           disabled={submitDisabled}
           className="rounded-lg bg-accent px-4 py-3 text-sm font-medium text-canvas transition-base
                      hover:shadow-glow-violet disabled:cursor-not-allowed disabled:opacity-50

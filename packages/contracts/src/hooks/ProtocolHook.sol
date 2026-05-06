@@ -194,7 +194,14 @@ contract ProtocolHook is IProtocolHook {
 
     /// @inheritdoc IProtocolHook
     /// @dev v1.0 always returns (0, 0) — observation-only mode.
-    function mevProfits(address /*vault*/ ) external pure override returns (uint256, uint256) {
+    function mevProfits(
+        address /*vault*/
+    )
+        external
+        pure
+        override
+        returns (uint256, uint256)
+    {
         return (0, 0);
     }
 
