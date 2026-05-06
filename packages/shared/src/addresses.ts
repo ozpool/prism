@@ -27,10 +27,10 @@ const PLACEHOLDER: DeploymentAddresses = {
 
 // <<deployed-baseSepolia>>
 const BASESEPOLIA: DeploymentAddresses = {
-  vaultFactory: "0x589dfb3dade3c379d38654063d5d8e85e15e39e5",
-  protocolHook: "0xe450c5128a5e7d42250a870a7df044902cee85c0",
-  bellStrategy: "0xfa60db53c04ca4add6c0cd0df1e8b6ba97d769ce",
-  chainlinkAdapter: "0x80466dd3dbe7a2e6910ea6522465adcb75fe2c35",
+  vaultFactory: "0xc7971d8e0856f7e287968257352a5588bbf6c64c",
+  protocolHook: "0x5f293d39afb11066b7018199865d973c240485c0",
+  bellStrategy: "0x8621557ebc7cc5bbbb7254eca39fcc21fc9bd68c",
+  chainlinkAdapter: "0x8ae80adfc0713c47e331418d1874ced8383a3ec1",
   poolManager: "0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408",
 };
 // <</deployed-baseSepolia>>
