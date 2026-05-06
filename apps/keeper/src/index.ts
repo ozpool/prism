@@ -6,11 +6,16 @@ import pino from "pino";
 import {loadConfig} from "./config.js";
 import {startHealthServer, stopHealthServer} from "./health.js";
 import {Metrics} from "./metrics.js";
-import {runPollLoop} from "./poll.js";
+import {runCycle, runPollLoop} from "./poll.js";
 import {captureException, flushSentry, initSentry} from "./sentry.js";
 import {gweiToWei} from "./submit.js";
 
 const METRIC_SNAPSHOT_INTERVAL_MS = 60_000;
+
+/// One-shot mode runs a single poll cycle and exits — the shape we want
+/// for cron triggers (GitHub Actions, k8s CronJob). Selected via `--once`
+/// or `RUN_ONCE=1`; otherwise the keeper runs the long-poll forever loop.
+const ONCE_MODE = process.argv.includes("--once") || process.env.RUN_ONCE === "1";
 
 async function main() {
   const config = loadConfig();
@@ -59,6 +64,28 @@ async function main() {
   } as unknown as Parameters<typeof runPollLoop>[0]["client"];
 
   const metrics = new Metrics();
+
+  // One-shot mode: skip the health server and the metric-snapshot timer
+  // (cron runs are short-lived and don't need a /health endpoint), run a
+  // single cycle, flush Sentry, and exit. Failed cycles map to a non-zero
+  // exit so the cron platform surfaces the failure.
+  if (ONCE_MODE) {
+    const ok = await runCycle({
+      client: client as unknown as Parameters<typeof runCycle>[0]["client"],
+      factory: config.VAULT_FACTORY_ADDRESS as Address,
+      poolManager: config.POOL_MANAGER_ADDRESS as Address,
+      account: account.address,
+      maxFeePerGasCap: gweiToWei(config.MAX_GAS_PRICE_GWEI),
+      txAttemptTimeoutMs: 60_000,
+      maxSubmitAttempts: 3,
+      logger,
+      metrics,
+    });
+    logger.info({metrics: metrics.snapshot()}, "one-shot cycle complete");
+    await flushSentry();
+    process.exit(ok ? 0 : 1);
+  }
+
   const healthServer = startHealthServer({port: config.HEALTH_PORT, logger, metrics});
 
   const stop = runPollLoop({
