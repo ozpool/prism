@@ -1,4 +1,4 @@
-import type {Address, Hex} from "viem";
+import type {Account, Address, Hex} from "viem";
 import type {Logger} from "pino";
 
 import {strategyAbi, vaultAbi, vaultFactoryAbi} from "./abi.js";
@@ -35,8 +35,10 @@ export interface PollDeps {
   factory: Address;
   poolManager: Address;
   /// Keeper account used as the `from` for sim eth_call AND as the
-  /// signer for submission.
-  account: Address;
+  /// signer for submission. Must be the full Account object (from
+  /// privateKeyToAccount) — passing just an Address makes viem fall
+  /// back to eth_sendTransaction, which most public RPCs reject.
+  account: Account;
   /// Hard ceiling on maxFeePerGas — keeper refuses to submit above this.
   maxFeePerGasCap: bigint;
   /// Per-attempt timeout before a stuck tx is repriced.
@@ -142,7 +144,7 @@ async function evaluateVault(deps: EvaluateOne): Promise<VaultEvaluation> {
   logger.info({vault, currentTick, lastTick, lastTimestamp: lastTimestamp.toString()}, "vault due for rebalance");
 
   // Sim gate (#57): run eth_call against pending before submission.
-  const simulation = await gatedSimulate({client, vault, account, logger});
+  const simulation = await gatedSimulate({client, vault, account: account.address, logger});
   if (!simulation.ok) {
     return {vault, poolId, currentTick, shouldRebalance, simulation};
   }
@@ -150,7 +152,7 @@ async function evaluateVault(deps: EvaluateOne): Promise<VaultEvaluation> {
   // Submission (#58): writeContract + confirmation wait + reprice on stuck.
   const submission = await submitRebalance({
     client,
-    account,
+    signer: account,
     vault,
     logger,
     maxFeePerGasCap: deps.maxFeePerGasCap,
