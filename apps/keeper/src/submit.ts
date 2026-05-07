@@ -1,4 +1,4 @@
-import type {Address, Hash, Hex, TransactionReceipt} from "viem";
+import type {Account, Address, Hash, Hex, TransactionReceipt} from "viem";
 import type {Logger} from "pino";
 
 import {vaultAbi} from "./abi.js";
@@ -8,7 +8,7 @@ import {vaultAbi} from "./abi.js";
 /// the keeper / shared / web packages.
 export interface SubmitClient {
   writeContract: (args: {
-    account: Address;
+    account: Account | Address;
     address: Address;
     abi: readonly unknown[];
     functionName: string;
@@ -25,7 +25,11 @@ export interface SubmitClient {
 
 export interface SubmitDeps {
   client: SubmitClient;
-  account: Address;
+  /// Full Account (from privateKeyToAccount), not just the Address. viem
+  /// needs the Account object to sign locally — passing just an Address
+  /// makes viem fall back to eth_sendTransaction (server-side signing),
+  /// which Alchemy and most public RPCs reject.
+  signer: Account;
   vault: Address;
   logger: Logger;
   /// Hard ceiling — keeper refuses to submit above this gas price.
@@ -65,10 +69,10 @@ export type SubmitResult =
 ///
 /// Returns a typed verdict the caller can log + tally.
 export async function submitRebalance(deps: SubmitDeps): Promise<SubmitResult> {
-  const {client, account, vault, logger, maxFeePerGasCap, attemptTimeoutMs, maxAttempts, chain} = deps;
+  const {client, signer, vault, logger, maxFeePerGasCap, attemptTimeoutMs, maxAttempts, chain} = deps;
 
   // Pin the nonce up front so retries replace rather than queue.
-  const nonce = await client.getTransactionCount({address: account, blockTag: "pending"});
+  const nonce = await client.getTransactionCount({address: signer.address, blockTag: "pending"});
 
   let priorityFee: bigint | undefined;
   let lastError = "";
@@ -85,7 +89,7 @@ export async function submitRebalance(deps: SubmitDeps): Promise<SubmitResult> {
     let hash: Hash;
     try {
       hash = await client.writeContract({
-        account,
+        account: signer,
         address: vault,
         abi: vaultAbi,
         functionName: "rebalance",
